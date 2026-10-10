@@ -1,0 +1,13 @@
+# Dependencies
+node_modules/
+
+# Build & Release Outputs
+dist/
+release/
+src-tauri/target/
+
+# Local Shortcuts & Logs
+*.lnk
+*.log
+.DS_Store
+Thumbs.db

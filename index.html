@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <title>NetX — Network Utility &amp; Telemetry</title>
+    <script>
+      {
+        try {
+          const saved = localStorage.getItem('netx-theme') || 'system';
+          const meta = document.querySelector('meta[name="color-scheme"]');
+          const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+          const resolved = saved === 'system' ? (prefersDark ? 'dark' : 'light') : saved;
+          document.documentElement.setAttribute('data-theme', resolved);
+          document.documentElement.setAttribute('data-theme-Preference', saved);
+          if (meta) {
+            meta.content = saved === 'system' ? 'light dark' : saved;
+          }
+        } catch (e) {}
+      }
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
