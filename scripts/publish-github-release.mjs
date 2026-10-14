@@ -5,8 +5,10 @@ import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, '..');
+const pkg = JSON.parse(fs.readFileSync(path.join(rootDir, 'package.json'), 'utf8'));
 
 function getGithubToken() {
+  if (process.env.GITHUB_TOKEN) return process.env.GITHUB_TOKEN.trim();
   const out = execSync('git credential fill', {
     input: 'protocol=https\nhost=github.com\n\n',
     encoding: 'utf8',
@@ -16,42 +18,46 @@ function getGithubToken() {
   return m[1].trim();
 }
 
-const RELEASE_BODY = `## NetX — V 1.0.0 (Windows x64 Desktop Release)
+const RELEASE_BODY = `## NetX — Version 1.0.1 (Windows x64 Desktop Release)
 
-NetX is a modern, native Windows desktop network utility & telemetry suite designed to be **simple for beginners and useful for advanced users**.
+NetX is a modern, reliable Windows desktop network utility & telemetry suite designed for both beginners and network engineers.
 
-### ✨ Highlights in V 1.0.0
+### 🚀 What's New in Version 1.0.1
 
-* **Real-Time Network Overview & Dashboard**:
-  * Live **Download Mbps**, **Upload Mbps**, **Ping (ms)**, and **Jitter (ms)** measured directly from your Windows network adapter counters (\`GetIPStatistics\` & \`netstat -e\`).
-  * Interactive **4-Hop Connection Topology** (*Adapter → Local Gateway → DNS Resolver → Internet*) with live per-hop ICMP latency.
-  * Smooth dual-series **Real-Time Bandwidth Activity Graph** with hover inspection and Pause/Resume controls.
-* **Live Internet Speed Test**:
-  * Multi-stage benchmark (*Ping/Jitter → HTTPS Download → HTTPS Upload*) against Cloudflare Edge servers with persistent local history.
-* **Persistent Data Usage Tracking**:
-  * Tracks downloaded and uploaded bytes across **Day** (hourly), **Week** (daily), and **Month** views stored locally in \`%APPDATA%\\NetX\\netx-usage-store.json\`.
-* **Applications & Active Socket Inspector**:
-  * Live Windows process bandwidth table and \`netstat -ano\` TCP/UDP endpoint inspector with reverse-DNS hostname lookup.
-* **Wi-Fi Environment & Local LAN Scanner**:
-  * Real-time \`netsh wlan\` spectrum scanner (SSID, BSSID, Channel, Band, Signal %, dBm, WPA2/WPA3 cipher) and ARP/ICMP subnet device discovery.
-* **Interactive Network Tools & Guided Diagnostics**:
-  * Built-in **Ping**, **Traceroute**, **DNS Lookup** (\`A\`, \`AAAA\`, \`MX\`, \`NS\`, \`TXT\`), **TCP Port Check**, and a 4-stage guided **Network Diagnostics** runner.
-* **Appearance Modes & System Tray**:
-  * Full **Light**, **Dark**, and **System (Auto)** theme support that follows Windows OS theme changes automatically, plus a native Windows System Tray icon and quick menu.
+* **Official Windows Installer (\`NetX-Setup-1.0.1.exe\`)**:
+  * Packaged with NSIS installer supporting automatic Desktop and Start Menu shortcut creation.
+  * Standard Windows Add/Remove Programs uninstaller support.
+  * Packaged with high-resolution purple NetX brand icon.
+
+* **Light Mode High-Contrast Overhaul**:
+  * Completely revamped light mode styles with semantic CSS tokens (\`var(--text-primary)\`, \`var(--border-default)\`, etc.).
+  * High contrast readability across all cards, topology nodes, metrics, process tables, modals, and the Quick Command Palette.
+
+* **Minimalist Operations Dashboard**:
+  * Streamlined layout removing placeholder search inputs and extra starter cards.
+  * Focuses on live telemetry: real-time 60-second bandwidth waveform, 4-hop connection topology, hardware interface details, and active process bandwidth.
+
+* **Smooth Speed Test Transitions**:
+  * Added latency-locking interlude and visual staging transitions between the download and upload phases.
+  * Clear locked speed badge (\`✓ Download Locked\`) and responsive status cues.
+
+* **Sidebar & Emblem Layout Refinement**:
+  * Eliminated emblem-badge overlap when collapsed; centered purple globe icon with dedicated collapse/expand toggle beneath.
 
 ---
 
-### 📦 Installation / Running
+### 📦 Downloads
 
-1. Download **\`NetX-v1.0.0-win32-x64.zip\`** from the Assets section below.
-2. Extract the archive and run **\`NetX.exe\`**.
+* **Recommended**: **\`NetX-Setup-1.0.1.exe\`** — Standard Windows installer.
+* **Portable (Optional)**: **\`NetX-v1.0.1-win32-x64.zip\`** — Unzip and launch \`NetX.exe\` directly without installation.
 `;
 
 async function main() {
   const token = getGithubToken();
   const owner = 'kurui-ian';
   const repo = 'NetX';
-  const tag = 'v1.0.0';
+  const tag = `v${pkg.version}`;
+  const releaseTitle = `Version ${pkg.version}`;
 
   const headers = {
     Authorization: `Bearer ${token}`,
@@ -61,7 +67,7 @@ async function main() {
   };
 
   let release;
-  // Check if release for v1.0.0 already exists
+  // Check if release for tag already exists
   const checkRes = await fetch(
     `https://api.github.com/repos/${owner}/${repo}/releases/tags/${tag}`,
     { headers }
@@ -69,7 +75,7 @@ async function main() {
 
   if (checkRes.ok) {
     release = await checkRes.json();
-    console.log(`Found existing release ID ${release.id}, updating...`);
+    console.log(`Found existing release ID ${release.id} for tag ${tag}, updating...`);
     const updateRes = await fetch(
       `https://api.github.com/repos/${owner}/${repo}/releases/${release.id}`,
       {
@@ -77,7 +83,7 @@ async function main() {
         headers,
         body: JSON.stringify({
           tag_name: tag,
-          name: 'V 1.0.0',
+          name: releaseTitle,
           body: RELEASE_BODY,
           draft: false,
           prerelease: false,
@@ -86,7 +92,7 @@ async function main() {
     );
     release = await updateRes.json();
   } else {
-    console.log('Creating new GitHub Release V 1.0.0...');
+    console.log(`Creating new GitHub Release ${releaseTitle} for tag ${tag}...`);
     const createRes = await fetch(
       `https://api.github.com/repos/${owner}/${repo}/releases`,
       {
@@ -95,7 +101,7 @@ async function main() {
         body: JSON.stringify({
           tag_name: tag,
           target_commitish: 'main',
-          name: 'V 1.0.0',
+          name: releaseTitle,
           body: RELEASE_BODY,
           draft: false,
           prerelease: false,
@@ -108,30 +114,40 @@ async function main() {
     release = await createRes.json();
   }
 
-  console.log(`Release V 1.0.0 ready at: ${release.html_url}`);
+  console.log(`Release ${releaseTitle} ready at: ${release.html_url}`);
 
-  // Upload assets
+  // Determine assets to upload
+  const installerExePath = path.join(rootDir, 'release-installer', `NetX Setup ${pkg.version}.exe`);
   const assetsToUpload = [
     {
-      filePath: path.join(rootDir, 'release', 'NetX-v1.0.0-win32-x64.zip'),
-      name: 'NetX-v1.0.0-win32-x64.zip',
-      contentType: 'application/zip',
+      filePath: installerExePath,
+      name: `NetX-Setup-${pkg.version}.exe`,
+      contentType: 'application/vnd.microsoft.portable-executable',
     },
     {
-      filePath: path.join(rootDir, 'release', 'SHA256SUMS.txt'),
-      name: 'SHA256SUMS.txt',
-      contentType: 'text/plain',
+      filePath: path.join(rootDir, 'release-installer', 'latest.yml'),
+      name: 'latest.yml',
+      contentType: 'text/yaml',
+    },
+    {
+      filePath: path.join(rootDir, 'release', `NetX-v${pkg.version}-win32-x64.zip`),
+      name: `NetX-v${pkg.version}-win32-x64.zip`,
+      contentType: 'application/zip',
     },
   ];
 
   const uploadBaseUrl = release.upload_url.replace(/\{\?name,label\}$/, '');
 
   for (const asset of assetsToUpload) {
-    if (!fs.existsSync(asset.filePath)) continue;
+    if (!fs.existsSync(asset.filePath)) {
+      console.log(`Skipping asset ${asset.name} (file not found: ${asset.filePath})`);
+      continue;
+    }
 
-    // Delete existing asset with same name if present
+    // Check existing asset
     const existing = (release.assets || []).find((a) => a.name === asset.name);
     if (existing) {
+      console.log(`Deleting previous upload of ${asset.name} (asset ID: ${existing.id})...`);
       await fetch(
         `https://api.github.com/repos/${owner}/${repo}/releases/assets/${existing.id}`,
         { method: 'DELETE', headers }
@@ -162,11 +178,11 @@ async function main() {
       console.error(`Warning uploading ${asset.name}: ${upRes.status} ${await upRes.text()}`);
     } else {
       const upJson = await upRes.json();
-      console.log(`Uploaded ${asset.name} -> ${upJson.browser_download_url}`);
+      console.log(`Uploaded ${asset.name} successfully -> ${upJson.browser_download_url}`);
     }
   }
 
-  console.log(`SUCCESS: GitHub Release published at ${release.html_url}`);
+  console.log(`\n🎉 SUCCESS: GitHub Release published at ${release.html_url}`);
 }
 
 main().catch((err) => {
