@@ -6,9 +6,21 @@ export type NavSection =
   | 'connections'
   | 'wifi'
   | 'network'
+  | 'gaming'
   | 'tools'
   | 'diagnostics'
+  | 'history'
   | 'settings';
+
+export interface NetworkEventItem {
+  id: string;
+  timestamp: string;
+  type: 'disconnect' | 'reconnect' | 'latency_spike' | 'packet_loss' | 'threshold' | 'adapter_change' | 'info';
+  severity: 'info' | 'warning' | 'danger';
+  title: string;
+  description: string;
+  evidence?: string;
+}
 
 export type AppearanceMode = 'light' | 'dark' | 'system';
 
@@ -27,9 +39,14 @@ export interface SpeedTestRecord {
   server: string;
   pingMs: number;
   jitterMs: number;
+  packetLossPct?: number;
+  minPingMs?: number;
+  maxPingMs?: number;
   downloadMbps: number;
   uploadMbps: number;
   interfaceName: string;
+  durationSec?: number;
+  status?: 'complete' | 'aborted' | 'error';
 }
 
 export interface AppTrafficItem {
@@ -168,10 +185,14 @@ declare global {
       getConnectionsAndApps: () => Promise<any>;
       getWifiNetworks: (rescan?: boolean) => Promise<any>;
       getLanDevices: (activeSweep?: boolean) => Promise<any>;
-      runSpeedTest: () => Promise<any>;
+      runSpeedTest: (options?: { server?: string }) => Promise<any>;
+      cancelSpeedTest: () => Promise<any>;
       onSpeedTestProgress: (cb: (data: any) => void) => () => void;
       runDiagnosticStep: (stepId: string) => Promise<any>;
-      runTool: (tool: string, target: string) => Promise<any>;
+      runTool: (tool: string, target?: string, options?: any) => Promise<any>;
+      exportDiagnosticReport: (reportData: any, format?: 'json' | 'txt') => Promise<{ ok: boolean; filePath?: string; cancelled?: boolean; error?: string }>;
+      toggleMiniMode: (enableMini: boolean) => Promise<{ ok: boolean; mini?: boolean }>;
+      setAlwaysOnTop: (flag: boolean) => Promise<{ ok: boolean; isAlwaysOnTop?: boolean }>;
       setStartupRegistry: (enabled: boolean, minimized: boolean) => Promise<any>;
       clearUsageHistory: () => Promise<any>;
       quitApp: () => Promise<any>;

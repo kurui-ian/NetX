@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
 import {
   ActiveConnectionItem,
   AppearanceMode,
@@ -7,6 +7,7 @@ import {
   LanDeviceItem,
   NavSection,
   NetXSettings,
+  NetworkEventItem,
   RealNetworkInfo,
   ResolvedTheme,
   SpeedTestRecord,
@@ -93,6 +94,9 @@ interface NetXContextValue {
   refreshConnectionsAndApps: () => Promise<void>;
   toasts: ToastMessage[];
   pushToast: (text: string, type?: ToastMessage['type']) => void;
+  networkEvents: NetworkEventItem[];
+  addNetworkEvent: (evt: Omit<NetworkEventItem, 'id' | 'timestamp'>) => void;
+  clearNetworkEvents: () => void;
 }
 
 const NetXContext = createContext<NetXContextValue | null>(null);
@@ -220,6 +224,49 @@ export const NetXProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }, 3200);
   }, []);
 
+  // Network Event History (Section 14)
+  const [networkEvents, setNetworkEvents] = useState<NetworkEventItem[]>(() => {
+    try {
+      const saved = localStorage.getItem('netx-network-events-v1');
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return [
+      {
+        id: `evt-init`,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+        type: 'info',
+        severity: 'info',
+        title: 'Network Telemetry Initialized',
+        description: 'NetX started live monitoring on primary network interface.',
+        evidence: 'Operating system counters and ping probes active.',
+      },
+    ];
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('netx-network-events-v1', JSON.stringify(networkEvents.slice(0, 100)));
+    } catch {}
+  }, [networkEvents]);
+
+  const addNetworkEvent = useCallback((evt: Omit<NetworkEventItem, 'id' | 'timestamp'>) => {
+    const newEntry: NetworkEventItem = {
+      ...evt,
+      id: `evt-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+    };
+    setNetworkEvents((prev) => [newEntry, ...prev.slice(0, 99)]);
+  }, []);
+
+  const clearNetworkEvents = useCallback(() => {
+    setNetworkEvents([]);
+    pushToast('Network event history cleared.', 'info');
+  }, [pushToast]);
+
+  const lastConnectedRef = useRef<boolean | null>(null);
+  const lastLatencySpikeRef = useRef<number>(0);
+  const lastThresholdAlertRef = useRef<number>(0);
+
   // Poll Real OS Telemetry
   const pollTelemetry = useCallback(async () => {
     if (!window.netxNative) return;
@@ -227,8 +274,66 @@ export const NetXProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const data = await window.netxNative.getTelemetry();
       if (!data) return;
 
-      setConnected(Boolean(data.connected));
-      setInternetReachable(Boolean(data.internetReachable));
+      const isConn = Boolean(data.connected);
+      const isNet = Boolean(data.internetReachable);
+
+      // Event detection: connection drop or restoration
+      if (lastConnectedRef.current !== null) {
+        if (lastConnectedRef.current && !isNet) {
+          addNetworkEvent({
+            type: 'disconnect',
+            severity: 'danger',
+            title: 'Internet Connection Lost',
+            description: 'Unable to reach external DNS or gateway.',
+            evidence: `Ping to 1.1.1.1 failed. Adapter: ${data.network?.interfaceName || 'Active'}`,
+          });
+          if (settings.notifyConnectionChanges) {
+            pushToast('Internet connection dropped.', 'warning');
+          }
+        } else if (!lastConnectedRef.current && isNet) {
+          addNetworkEvent({
+            type: 'reconnect',
+            severity: 'info',
+            title: 'Internet Connection Restored',
+            description: `Internet reachability recovered on ${data.network?.interfaceName || 'interface'}.`,
+            evidence: `Gateway ${data.network?.gateway} reachable. Latency: ${data.pingMs} ms`,
+          });
+          if (settings.notifyConnectionChanges) {
+            pushToast('Internet connection restored.', 'success');
+          }
+        }
+      }
+      lastConnectedRef.current = isNet;
+
+      // Event detection: Latency spike (> 180ms) with 60s cooldown
+      const nowTs = Date.now();
+      if (data.pingMs > 180 && nowTs - lastLatencySpikeRef.current > 60000) {
+        lastLatencySpikeRef.current = nowTs;
+        addNetworkEvent({
+          type: 'latency_spike',
+          severity: 'warning',
+          title: `High Latency Detected (${data.pingMs} ms)`,
+          description: `Network round-trip latency exceeded normal threshold of 180ms.`,
+          evidence: `DNS: ${data.dnsPingMs} ms · Gateway: ${data.gatewayPingMs} ms · Jitter: ${data.jitterMs} ms`,
+        });
+      }
+
+      // Event detection: Monthly data usage threshold alert (90% of cap)
+      const capGb = settings.monthlyCapGb || 500;
+      if (settings.notifyUsageAlerts && data.monthTotalGb >= capGb * 0.9 && nowTs - lastThresholdAlertRef.current > 86400000) {
+        lastThresholdAlertRef.current = nowTs;
+        addNetworkEvent({
+          type: 'threshold',
+          severity: 'warning',
+          title: 'Data Allowance 90% Threshold Exceeded',
+          description: `Current month usage has reached ${(data.monthTotalGb).toFixed(1)} GB of your ${capGb} GB cap.`,
+          evidence: `Daily average consumption: ${(data.monthTotalGb / Math.max(1, new Date().getDate())).toFixed(2)} GB/day`,
+        });
+        pushToast(`Warning: Data usage reached 90% of monthly ${capGb} GB allowance.`, 'warning');
+      }
+
+      setConnected(isConn);
+      setInternetReachable(isNet);
       setCurrentDownloadMbps(data.downloadMbps || 0);
       setCurrentUploadMbps(data.uploadMbps || 0);
       setCurrentPingMs(data.pingMs || 0);
@@ -264,7 +369,7 @@ export const NetXProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } catch {
       // ignore transient error
     }
-  }, []);
+  }, [addNetworkEvent, pushToast, settings.notifyConnectionChanges, settings.notifyUsageAlerts, settings.monthlyCapGb]);
 
   const refreshConnectionsAndApps = useCallback(async () => {
     if (!window.netxNative) return;
@@ -444,6 +549,9 @@ export const NetXProvider: React.FC<{ children: React.ReactNode }> = ({ children
         refreshConnectionsAndApps,
         toasts,
         pushToast,
+        networkEvents,
+        addNetworkEvent,
+        clearNetworkEvents,
       }}
     >
       {children}

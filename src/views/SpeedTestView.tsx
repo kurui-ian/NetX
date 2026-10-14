@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Activity,
   ArrowDown,
@@ -9,6 +9,11 @@ import {
   RotateCcw,
   Server,
   Trash2,
+  XCircle,
+  Clock,
+  Layers,
+  TrendingUp,
+  DownloadCloud,
 } from 'lucide-react';
 import { useNetX } from '../context/NetXContext';
 import {
@@ -17,8 +22,14 @@ import {
   ErrorStateBox,
   StatusBadge,
 } from '../components/ui/Primitives';
+import { SpeedTestRecord } from '../types/netx';
 
-type TestStage = 'idle' | 'ping' | 'download' | 'upload' | 'complete' | 'error';
+type TestStage = 'idle' | 'prep' | 'ping' | 'download' | 'upload' | 'finalizing' | 'complete' | 'cancelled' | 'error';
+
+interface ThroughputPoint {
+  sec: number;
+  mbps: number;
+}
 
 export const SpeedTestView: React.FC = () => {
   const {
@@ -32,20 +43,43 @@ export const SpeedTestView: React.FC = () => {
   const [stage, setStage] = useState<TestStage>('idle');
   const [progress, setProgress] = useState<number>(0);
   const [liveValue, setLiveValue] = useState<number>(0);
+  const [statusText, setStatusText] = useState<string>('Ready to benchmark');
+  const [selectedServer, setSelectedServer] = useState<string>('Cloudflare Anycast Edge');
 
+  // Test Metrics
   const [pingResult, setPingResult] = useState<number | null>(null);
+  const [jitterResult, setJitterResult] = useState<number | null>(null);
+  const [lossResult, setLossResult] = useState<number | null>(null);
   const [downloadResult, setDownloadResult] = useState<number | null>(null);
   const [uploadResult, setUploadResult] = useState<number | null>(null);
+  const [durationResult, setDurationResult] = useState<number | null>(null);
   const [errorDetails, setErrorDetails] = useState<string>('');
+
+  // Live Throughput Samples Array for Real-Time Graph
+  const [liveSamples, setLiveSamples] = useState<ThroughputPoint[]>([]);
+
+  // History Table Selection for Comparison
+  const [selectedHistoryIds, setSelectedHistoryIds] = useState<string[]>([]);
+  const [sortBy, setSortBy] = useState<'date' | 'download' | 'upload' | 'ping'>('date');
+  const [sortAsc, setSortAsc] = useState<boolean>(false);
+
+  const isRunning = stage === 'prep' || stage === 'ping' || stage === 'download' || stage === 'upload' || stage === 'finalizing';
 
   useEffect(() => {
     if (!window.netxNative) return;
-    const unsubscribe = window.netxNative.onSpeedTestProgress((data) => {
+    const unsubscribe = window.netxNative.onSpeedTestProgress((data: any) => {
       if (data.stage) setStage(data.stage);
       if (typeof data.progress === 'number') setProgress(data.progress);
       if (typeof data.liveValue === 'number') setLiveValue(data.liveValue);
       if (typeof data.pingMs === 'number') setPingResult(data.pingMs);
+      if (typeof data.jitterMs === 'number') setJitterResult(data.jitterMs);
+      if (typeof data.packetLossPct === 'number') setLossResult(data.packetLossPct);
       if (typeof data.downloadMbps === 'number') setDownloadResult(data.downloadMbps);
+      if (data.status) setStatusText(data.status);
+      if (data.server) setSelectedServer(data.server);
+      if (Array.isArray(data.samples)) {
+        setLiveSamples(data.samples);
+      }
     });
     return unsubscribe;
   }, []);
@@ -53,95 +87,293 @@ export const SpeedTestView: React.FC = () => {
   const startSpeedTest = async () => {
     if (!window.netxNative) return;
     setPingResult(null);
+    setJitterResult(null);
+    setLossResult(null);
     setDownloadResult(null);
     setUploadResult(null);
+    setDurationResult(null);
     setErrorDetails('');
-    setProgress(2);
+    setProgress(3);
     setLiveValue(0);
-    setStage('ping');
+    setLiveSamples([]);
+    setStage('prep');
+    setStatusText('Initializing connection to benchmark server...');
 
-    const res = await window.netxNative.runSpeedTest();
+    const res = await window.netxNative.runSpeedTest({ server: selectedServer });
+
     if (!res || !res.ok) {
-      setErrorDetails(res?.error || 'Connection to benchmark server failed.');
-      setStage('error');
+      if (res?.cancelled) {
+        setStage('cancelled');
+        setStatusText('Speed test was cancelled by user.');
+        pushToast('Speed test was cancelled.', 'info');
+      } else {
+        setErrorDetails(res?.error || 'Connection to benchmark server failed.');
+        setStage('error');
+        setStatusText('Speed test failed.');
+      }
       return;
     }
 
     setPingResult(res.pingMs);
+    setJitterResult(res.jitterMs);
+    setLossResult(res.packetLossPct ?? 0);
     setDownloadResult(res.downloadMbps);
     setUploadResult(res.uploadMbps);
+    setDurationResult(res.durationSec || 22);
     setProgress(100);
     setStage('complete');
+    setStatusText('Speed test successfully completed.');
 
     addSpeedTestRecord({
-      server: res.server || networkInfo.ispEdge || 'Cloudflare Speed Edge',
+      server: res.server || selectedServer || 'Cloudflare Anycast Edge',
       pingMs: res.pingMs,
+      minPingMs: res.minPingMs,
+      maxPingMs: res.maxPingMs,
       jitterMs: res.jitterMs || 1.0,
+      packetLossPct: res.packetLossPct ?? 0,
       downloadMbps: res.downloadMbps,
       uploadMbps: res.uploadMbps,
-      interfaceName: `${networkInfo.interfaceName} (${networkInfo.ssid})`,
+      durationSec: res.durationSec || 22,
+      interfaceName: `${networkInfo.interfaceName} (${networkInfo.ssid || 'Active'})`,
+      status: 'complete',
     });
 
     pushToast(
-      `Speed test complete: ${res.downloadMbps.toFixed(1)} Mbps down / ${res.uploadMbps.toFixed(1)} Mbps up`,
+      `Speed test complete: ↓ ${res.downloadMbps.toFixed(1)} Mbps · ↑ ${res.uploadMbps.toFixed(1)} Mbps · ${res.pingMs} ms`,
       'success'
     );
   };
 
-  const isRunning = stage === 'ping' || stage === 'download' || stage === 'upload';
+  const handleCancel = async () => {
+    if (window.netxNative?.cancelSpeedTest) {
+      await window.netxNative.cancelSpeedTest();
+    }
+    setStage('cancelled');
+    setStatusText('Speed test cancelled.');
+    pushToast('Speed test cancelled.', 'info');
+  };
 
-  const getStageLabel = () => {
-    if (stage === 'ping') return 'Measuring network ping & jitter...';
-    if (stage === 'download') return 'Testing download speed...';
-    if (stage === 'upload') return 'Testing upload speed...';
-    if (stage === 'complete') return 'Speed Test Complete';
-    return 'Check your internet connection.';
+  // Speedometer Gauge Arc Geometry Calculations
+  // Gauge spans 260° (from 140° to 400°).
+  const gaugeConfig = useMemo(() => {
+    const cx = 130;
+    const cy = 130;
+    const r = 98;
+    const startAngle = 140;
+    const endAngle = 400;
+    const totalSweep = endAngle - startAngle; // 260 deg
+
+    // Map speed (0 to 500 Mbps default) logarithmically or linearly with soft scaling
+    const maxScale = Math.max(100, Math.min(1000, Math.ceil(((liveValue || 10) * 1.3) / 50) * 50));
+    const valueRatio = Math.min(1, Math.max(0, liveValue / maxScale));
+    const activeAngle = startAngle + valueRatio * totalSweep;
+
+    const polarToCartesian = (centerX: number, centerY: number, radius: number, angleInDegrees: number) => {
+      const angleInRadians = ((angleInDegrees - 90) * Math.PI) / 180.0;
+      return {
+        x: centerX + radius * Math.cos(angleInRadians),
+        y: centerY + radius * Math.sin(angleInRadians),
+      };
+    };
+
+    const describeArc = (x: number, y: number, radius: number, start: number, end: number) => {
+      const startPt = polarToCartesian(x, y, radius, end);
+      const endPt = polarToCartesian(x, y, radius, start);
+      const largeArcFlag = end - start <= 180 ? '0' : '1';
+      return ['M', startPt.x, startPt.y, 'A', radius, radius, 0, largeArcFlag, 0, endPt.x, endPt.y].join(' ');
+    };
+
+    const trackPath = describeArc(cx, cy, r, startAngle, endAngle);
+    const activePath = describeArc(cx, cy, r, startAngle, activeAngle);
+
+    // Graduation ticks at 0%, 25%, 50%, 75%, 100%
+    const ticks = [0, 0.25, 0.5, 0.75, 1.0].map((frac) => {
+      const ang = startAngle + frac * totalSweep;
+      const p1 = polarToCartesian(cx, cy, r - 6, ang);
+      const p2 = polarToCartesian(cx, cy, r + 4, ang);
+      const labelVal = Math.round(frac * maxScale);
+      return { p1, p2, labelVal, ang };
+    });
+
+    return { cx, cy, r, trackPath, activePath, ticks, maxScale };
+  }, [liveValue]);
+
+  // Sorted History Items
+  const sortedHistory = useMemo(() => {
+    return [...speedTestHistory].sort((a, b) => {
+      let diff = 0;
+      if (sortBy === 'download') diff = a.downloadMbps - b.downloadMbps;
+      else if (sortBy === 'upload') diff = a.uploadMbps - b.uploadMbps;
+      else if (sortBy === 'ping') diff = a.pingMs - b.pingMs;
+      else diff = new Date(b.date).getTime() - new Date(a.date).getTime();
+      return sortAsc ? diff : -diff;
+    });
+  }, [speedTestHistory, sortBy, sortAsc]);
+
+  // Comparison pair
+  const comparisonPair = useMemo(() => {
+    if (selectedHistoryIds.length !== 2) return null;
+    const testA = speedTestHistory.find((t) => t.id === selectedHistoryIds[0]);
+    const testB = speedTestHistory.find((t) => t.id === selectedHistoryIds[1]);
+    if (!testA || !testB) return null;
+    return { testA, testB };
+  }, [selectedHistoryIds, speedTestHistory]);
+
+  const toggleSelectHistory = (id: string) => {
+    setSelectedHistoryIds((prev) => {
+      if (prev.includes(id)) return prev.filter((x) => x !== id);
+      if (prev.length >= 2) return [prev[1], id];
+      return [...prev, id];
+    });
+  };
+
+  const exportHistoryCSV = () => {
+    if (speedTestHistory.length === 0) return;
+    const headers = ['Date', 'Interface', 'Server', 'Ping (ms)', 'Jitter (ms)', 'Packet Loss (%)', 'Download (Mbps)', 'Upload (Mbps)', 'Duration (s)'];
+    const rows = speedTestHistory.map((t) => [
+      `"${t.date}"`,
+      `"${t.interfaceName}"`,
+      `"${t.server}"`,
+      t.pingMs,
+      t.jitterMs,
+      t.packetLossPct ?? 0,
+      t.downloadMbps.toFixed(2),
+      t.uploadMbps.toFixed(2),
+      t.durationSec ?? 0,
+    ]);
+    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement('a');
+    link.setAttribute('href', encodedUri);
+    link.setAttribute('download', `NetX-SpeedTest-History-${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    pushToast('Exported speed test history to CSV.', 'success');
   };
 
   return (
     <div className="page-container">
-      {/* Primary Speed Test Stage Card (Section 11) */}
+      {/* Primary Speed Test Stage Card */}
       <section className="surface-panel" aria-label="Speed test runner">
-        <div className="surface-panel-header">
+        <div className="surface-panel-header" style={{ flexWrap: 'wrap', gap: 12 }}>
           <div>
-            <h2 className="surface-panel-title">Speed Test</h2>
+            <h2 className="surface-panel-title">Internet Speed Benchmark</h2>
             <p className="surface-panel-subtitle">
-              Target: Cloudflare Global Edge · Interface: {networkInfo.interfaceName} (
-              {networkInfo.ssid} · {networkInfo.ipv4})
+              Engine: Multi-stream HTTPS Throughput · Target: {selectedServer} · Adapter:{' '}
+              {networkInfo.interfaceName} ({networkInfo.ssid || networkInfo.ipv4})
             </p>
           </div>
 
-          <StatusBadge
-            variant={
-              stage === 'error'
-                ? 'danger'
-                : stage === 'complete'
-                ? 'success'
-                : isRunning
-                ? 'info'
-                : 'neutral'
-            }
-            iconStyle={isRunning ? 'spinner' : stage === 'complete' ? 'check' : 'dot'}
-            label={
-              stage === 'error'
-                ? 'Test Failed'
-                : stage === 'complete'
-                ? 'Complete'
-                : isRunning
-                ? 'Testing Live...'
-                : 'Ready'
-            }
-          />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            {/* Server Selector */}
+            <select
+              className="select-field"
+              style={{ fontSize: 12.5, padding: '5px 10px', height: 32 }}
+              value={selectedServer}
+              disabled={isRunning}
+              onChange={(e) => setSelectedServer(e.target.value)}
+              aria-label="Measurement server"
+            >
+              <option value="Cloudflare Anycast Edge">Cloudflare Anycast Global Edge</option>
+              <option value="Fast Cloud CDN">High-Capacity CDN Edge</option>
+            </select>
+
+            <StatusBadge
+              variant={
+                stage === 'error'
+                  ? 'danger'
+                  : stage === 'complete'
+                  ? 'success'
+                  : stage === 'cancelled'
+                  ? 'warning'
+                  : isRunning
+                  ? 'info'
+                  : 'neutral'
+              }
+              iconStyle={isRunning ? 'spinner' : stage === 'complete' ? 'check' : 'dot'}
+              label={
+                stage === 'error'
+                  ? 'Failed'
+                  : stage === 'complete'
+                  ? 'Completed'
+                  : stage === 'cancelled'
+                  ? 'Cancelled'
+                  : isRunning
+                  ? `Testing (${progress}%)`
+                  : 'Ready'
+              }
+            />
+          </div>
         </div>
 
-        {/* Error State (Section 16) */}
+        {/* Phase Pipeline Pills */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 8,
+            padding: '12px 16px',
+            borderBottom: '1px solid var(--border-subtle)',
+            background: 'var(--bg-surface-subtle)',
+            flexWrap: 'wrap',
+          }}
+        >
+          {[
+            { id: 'prep', label: '1. Prepare' },
+            { id: 'ping', label: '2. Latency & Loss' },
+            { id: 'download', label: '3. Download' },
+            { id: 'upload', label: '4. Upload' },
+            { id: 'complete', label: '5. Results' },
+          ].map((step, idx) => {
+            const stepOrder = ['prep', 'ping', 'download', 'upload', 'complete'];
+            const currentIdx = stepOrder.indexOf(stage === 'finalizing' ? 'upload' : stage);
+            const isStepActive = stage === step.id;
+            const isStepDone = stage === 'complete' || currentIdx > idx;
+
+            return (
+              <div
+                key={step.id}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  padding: '4px 12px',
+                  borderRadius: 'var(--radius-pill)',
+                  fontSize: 12,
+                  fontWeight: isStepActive ? 700 : 500,
+                  background: isStepActive
+                    ? 'rgba(168, 85, 247, 0.22)'
+                    : isStepDone
+                    ? 'rgba(45, 212, 191, 0.12)'
+                    : 'transparent',
+                  color: isStepActive
+                    ? '#e9d5ff'
+                    : isStepDone
+                    ? 'var(--brand-mint)'
+                    : 'var(--text-muted)',
+                  border: isStepActive
+                    ? '1px solid rgba(192, 132, 252, 0.4)'
+                    : '1px solid transparent',
+                  transition: 'all 0.2s ease',
+                }}
+              >
+                {isStepDone ? <CheckCircle2 size={13} /> : null}
+                <span>{step.label}</span>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Error State */}
         {stage === 'error' ? (
           <ErrorStateBox
-            title="Unable to perform speed test."
-            explanation="Your internet connection may be unavailable or the benchmark server could not be reached."
-            technicalDetails={`Error: ${errorDetails}\nInterface: ${networkInfo.adapterDescription} (${networkInfo.ipv4})`}
+            title="Unable to complete speed benchmark."
+            explanation="Your internet connection may be offline, congested, or the benchmark edge server timed out."
+            technicalDetails={`Error: ${errorDetails}\nAdapter: ${networkInfo.interfaceName} (${networkInfo.ipv4})`}
             onRetry={startSpeedTest}
-            retryLabel="Try Again"
+            retryLabel="Retry Speed Test"
           />
         ) : (
           <div
@@ -149,116 +381,227 @@ export const SpeedTestView: React.FC = () => {
               display: 'flex',
               flexDirection: 'column',
               alignItems: 'center',
-              padding: '24px 16px',
+              padding: '28px 16px',
               gap: 24,
             }}
           >
-            {/* Status Heading */}
-            <div style={{ textAlign: 'center' }}>
-              <div
-                style={{
-                  fontSize: stage === 'complete' ? 20 : 16,
-                  fontWeight: 700,
-                  color: 'var(--text-primary)',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 8,
-                }}
-              >
-                {stage === 'complete' && (
-                  <CheckCircle2 size={22} style={{ color: 'var(--status-success)' }} />
-                )}
-                <span>{getStageLabel()}</span>
-              </div>
-            </div>
+            {/* Speedometer Gauge & Live Display */}
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                position: 'relative',
+                width: 270,
+                height: 250,
+              }}
+            >
+              <svg width="270" height="240" viewBox="0 0 260 250" style={{ overflow: 'visible' }}>
+                <defs>
+                  <linearGradient id="gaugeGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" stopColor="#c084fc" />
+                    <stop offset="50%" stopColor="#a855f7" />
+                    <stop offset="100%" stopColor="#38bdf8" />
+                  </linearGradient>
+                  <filter id="gaugeGlow" x="-20%" y="-20%" width="140%" height="140%">
+                    <feGaussianBlur stdDeviation="4" result="blur" />
+                    <feComposite in="SourceGraphic" in2="blur" operator="over" />
+                  </filter>
+                </defs>
 
-            {/* During Test Live Readout & Progress Bar (Section 11) */}
-            {isRunning && (
+                {/* Background Track Arc */}
+                <path
+                  d={gaugeConfig.trackPath}
+                  fill="none"
+                  stroke="rgba(255, 255, 255, 0.08)"
+                  strokeWidth="14"
+                  strokeLinecap="round"
+                />
+
+                {/* Graduation Ticks */}
+                {gaugeConfig.ticks.map((t, i) => (
+                  <line
+                    key={i}
+                    x1={t.p1.x}
+                    y1={t.p1.y}
+                    x2={t.p2.x}
+                    y2={t.p2.y}
+                    stroke="rgba(255, 255, 255, 0.22)"
+                    strokeWidth="2"
+                  />
+                ))}
+
+                {/* Active Glowing Measured Arc */}
+                {stage !== 'idle' && (
+                  <path
+                    d={gaugeConfig.activePath}
+                    fill="none"
+                    stroke="url(#gaugeGradient)"
+                    strokeWidth="14"
+                    strokeLinecap="round"
+                    filter="url(#gaugeGlow)"
+                    style={{ transition: 'stroke-dasharray 0.2s ease, d 0.2s ease' }}
+                  />
+                )}
+              </svg>
+
+              {/* Center Typography Readout */}
               <div
                 style={{
-                  width: '100%',
-                  maxWidth: 460,
+                  position: 'absolute',
+                  top: 75,
                   display: 'flex',
                   flexDirection: 'column',
                   alignItems: 'center',
-                  gap: 12,
-                  padding: '16px 24px',
-                  borderRadius: 'var(--radius-md)',
-                  background: 'var(--bg-surface-subtle)',
-                  border: '1px solid var(--border-subtle)',
+                  textAlign: 'center',
+                  pointerEvents: 'none',
                 }}
               >
-                <div className="tabular-nums" style={{ fontSize: 42, fontWeight: 800 }}>
-                  {stage === 'ping' ? liveValue : liveValue.toFixed(1)}{' '}
-                  <span style={{ fontSize: 16, fontWeight: 600, color: 'var(--text-muted)' }}>
-                    {stage === 'ping' ? 'ms' : 'Mbps'}
-                  </span>
-                </div>
-
-                <div className="progress-track" aria-label="Speed test progress">
-                  <div className="progress-fill" style={{ width: `${progress}%` }} />
-                </div>
-
                 <div
+                  className="tabular-nums"
                   style={{
-                    width: '100%',
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    fontSize: 12,
-                    color: 'var(--text-muted)',
+                    fontSize: 48,
+                    fontWeight: 800,
+                    lineHeight: 1,
+                    letterSpacing: '-0.02em',
+                    color: 'var(--text-primary)',
                   }}
                 >
-                  <span>Stage: {stage.toUpperCase()}</span>
+                  {stage === 'ping'
+                    ? liveValue.toFixed(0)
+                    : stage === 'complete'
+                    ? downloadResult?.toFixed(1) ?? '—'
+                    : liveValue > 0
+                    ? liveValue.toFixed(1)
+                    : '0.0'}
+                </div>
+                <div
+                  style={{
+                    fontSize: 14,
+                    fontWeight: 700,
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.05em',
+                    color: stage === 'ping' ? 'var(--series-ping)' : 'var(--brand-lilac)',
+                    marginTop: 4,
+                  }}
+                >
+                  {stage === 'ping' ? 'ms (latency)' : 'Mbps'}
+                </div>
+              </div>
+
+              {/* Status Subtitle below gauge */}
+              <div
+                style={{
+                  position: 'absolute',
+                  bottom: 10,
+                  fontSize: 12.5,
+                  fontWeight: 500,
+                  color: 'var(--text-muted)',
+                  textAlign: 'center',
+                  maxWidth: 240,
+                }}
+              >
+                {statusText}
+              </div>
+            </div>
+
+            {/* Live Progress Bar during active test */}
+            {isRunning && (
+              <div style={{ width: '100%', maxWidth: 520, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <div className="progress-track">
+                  <div
+                    className="progress-fill"
+                    style={{
+                      width: `${progress}%`,
+                      transition: 'width 0.3s ease',
+                      background: 'linear-gradient(90deg, #c084fc 0%, #38bdf8 100%)',
+                    }}
+                  />
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11.5, color: 'var(--text-muted)' }}>
+                  <span>{statusText}</span>
                   <span className="mono">{progress}%</span>
                 </div>
               </div>
             )}
 
-            {/* 3 Primary Result Pillars: Download, Upload, Ping (Section 11) */}
+            {/* Real-time Throughput Graph (During Download or Upload) */}
+            {liveSamples.length > 1 && (
+              <div
+                style={{
+                  width: '100%',
+                  maxWidth: 580,
+                  padding: '14px 18px',
+                  borderRadius: 'var(--radius-md)',
+                  background: 'var(--bg-surface-subtle)',
+                  border: '1px solid var(--border-subtle)',
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <TrendingUp size={14} style={{ color: 'var(--brand-lilac)' }} />
+                    <span>Real-Time Measured Throughput ({stage.toUpperCase()})</span>
+                  </div>
+                  <span className="mono" style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
+                    Peak: {Math.max(...liveSamples.map((s) => s.mbps)).toFixed(1)} Mbps
+                  </span>
+                </div>
+
+                <div style={{ height: 60, display: 'flex', alignItems: 'flex-end', gap: 3 }}>
+                  {liveSamples.slice(-30).map((pt, i) => {
+                    const maxVal = Math.max(10, ...liveSamples.map((s) => s.mbps));
+                    const heightPct = Math.max(8, Math.round((pt.mbps / maxVal) * 100));
+                    return (
+                      <div
+                        key={i}
+                        title={`${pt.sec}s: ${pt.mbps} Mbps`}
+                        style={{
+                          flex: 1,
+                          height: `${heightPct}%`,
+                          borderRadius: '2px 2px 0 0',
+                          background:
+                            stage === 'download'
+                              ? 'linear-gradient(180deg, #c084fc 0%, rgba(192, 132, 252, 0.2) 100%)'
+                              : 'linear-gradient(180deg, #38bdf8 0%, rgba(56, 189, 248, 0.2) 100%)',
+                          transition: 'height 0.2s ease',
+                        }}
+                      />
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Primary Result Pillars: Download, Upload, Ping */}
             <div
               style={{
                 display: 'grid',
-                gridTemplateColumns: 'repeat(3, 1fr)',
-                gap: 18,
+                gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+                gap: 16,
                 width: '100%',
-                maxWidth: 740,
+                maxWidth: 820,
               }}
             >
-              {/* Download */}
+              {/* Download Metric Card */}
               <div
                 style={{
-                  padding: '20px 22px',
+                  padding: '18px 20px',
                   borderRadius: 'var(--radius-md)',
-                  background:
-                    stage === 'download' ? 'var(--bg-surface-tinted)' : 'var(--bg-surface-subtle)',
-                  border:
-                    stage === 'download'
-                      ? '1px solid var(--brand-mint)'
-                      : '1px solid var(--border-subtle)',
+                  background: stage === 'download' ? 'rgba(192, 132, 252, 0.12)' : 'var(--bg-surface-subtle)',
+                  border: stage === 'download' ? '1px solid rgba(192, 132, 252, 0.5)' : '1px solid var(--border-subtle)',
                   textAlign: 'center',
+                  transition: 'all 0.2s ease',
                 }}
               >
-                <div
-                  style={{
-                    fontSize: 12.5,
-                    fontWeight: 600,
-                    color: 'var(--text-secondary)',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 5,
-                    marginBottom: 8,
-                  }}
-                >
+                <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
                   <ArrowDown size={15} style={{ color: 'var(--series-download)' }} />
-                  <span>Download</span>
+                  <span>Download Speed</span>
                 </div>
                 <div className="tabular-nums" style={{ fontSize: 32, fontWeight: 800 }}>
                   {downloadResult !== null ? (
                     <>
                       {downloadResult.toFixed(1)}{' '}
-                      <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-muted)' }}>
-                        Mbps
-                      </span>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-muted)' }}>Mbps</span>
                     </>
                   ) : (
                     <span style={{ color: 'var(--text-muted)' }}>—</span>
@@ -266,41 +609,26 @@ export const SpeedTestView: React.FC = () => {
                 </div>
               </div>
 
-              {/* Upload */}
+              {/* Upload Metric Card */}
               <div
                 style={{
-                  padding: '20px 22px',
+                  padding: '18px 20px',
                   borderRadius: 'var(--radius-md)',
-                  background:
-                    stage === 'upload' ? 'var(--bg-surface-tinted)' : 'var(--bg-surface-subtle)',
-                  border:
-                    stage === 'upload'
-                      ? '1px solid var(--brand-amber)'
-                      : '1px solid var(--border-subtle)',
+                  background: stage === 'upload' ? 'rgba(56, 189, 248, 0.12)' : 'var(--bg-surface-subtle)',
+                  border: stage === 'upload' ? '1px solid rgba(56, 189, 248, 0.5)' : '1px solid var(--border-subtle)',
                   textAlign: 'center',
+                  transition: 'all 0.2s ease',
                 }}
               >
-                <div
-                  style={{
-                    fontSize: 12.5,
-                    fontWeight: 600,
-                    color: 'var(--text-secondary)',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 5,
-                    marginBottom: 8,
-                  }}
-                >
+                <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
                   <ArrowUp size={15} style={{ color: 'var(--series-upload)' }} />
-                  <span>Upload</span>
+                  <span>Upload Speed</span>
                 </div>
                 <div className="tabular-nums" style={{ fontSize: 32, fontWeight: 800 }}>
                   {uploadResult !== null ? (
                     <>
                       {uploadResult.toFixed(1)}{' '}
-                      <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-muted)' }}>
-                        Mbps
-                      </span>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-muted)' }}>Mbps</span>
                     </>
                   ) : (
                     <span style={{ color: 'var(--text-muted)' }}>—</span>
@@ -308,96 +636,202 @@ export const SpeedTestView: React.FC = () => {
                 </div>
               </div>
 
-              {/* Ping */}
+              {/* Latency & Quality Pillar */}
               <div
                 style={{
-                  padding: '20px 22px',
+                  padding: '18px 20px',
                   borderRadius: 'var(--radius-md)',
-                  background:
-                    stage === 'ping' ? 'var(--bg-surface-tinted)' : 'var(--bg-surface-subtle)',
-                  border:
-                    stage === 'ping'
-                      ? '1px solid var(--series-ping)'
-                      : '1px solid var(--border-subtle)',
+                  background: stage === 'ping' ? 'rgba(45, 212, 191, 0.12)' : 'var(--bg-surface-subtle)',
+                  border: stage === 'ping' ? '1px solid rgba(45, 212, 191, 0.5)' : '1px solid var(--border-subtle)',
                   textAlign: 'center',
+                  transition: 'all 0.2s ease',
                 }}
               >
-                <div
-                  style={{
-                    fontSize: 12.5,
-                    fontWeight: 600,
-                    color: 'var(--text-secondary)',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 5,
-                    marginBottom: 8,
-                  }}
-                >
+                <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
                   <Activity size={15} style={{ color: 'var(--series-ping)' }} />
-                  <span>Ping</span>
+                  <span>Latency &amp; Stability</span>
                 </div>
                 <div className="tabular-nums" style={{ fontSize: 32, fontWeight: 800 }}>
                   {pingResult !== null ? (
                     <>
                       {pingResult}{' '}
-                      <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-muted)' }}>
-                        ms
-                      </span>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-muted)' }}>ms</span>
                     </>
                   ) : (
                     <span style={{ color: 'var(--text-muted)' }}>—</span>
                   )}
                 </div>
+                {jitterResult !== null && (
+                  <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 4 }}>
+                    Jitter: <span className="mono">{jitterResult.toFixed(1)} ms</span> · Loss:{' '}
+                    <span className="mono">{lossResult ?? 0}%</span>
+                  </div>
+                )}
               </div>
             </div>
 
-            {/* Action Button: Start Test / Test Again */}
-            <div>
-              <Button
-                variant="primary"
-                size="lg"
-                loading={isRunning}
-                icon={stage === 'complete' ? <RotateCcw size={17} /> : <Play size={17} />}
-                onClick={startSpeedTest}
-              >
-                {stage === 'complete'
-                  ? 'Test Again'
-                  : isRunning
-                  ? 'Testing Connection...'
-                  : 'Start Test'}
-              </Button>
+            {/* Execution Buttons: Start / Cancel / Retest */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              {isRunning ? (
+                <Button
+                  variant="danger"
+                  size="lg"
+                  icon={<XCircle size={18} />}
+                  onClick={handleCancel}
+                >
+                  Cancel Test
+                </Button>
+              ) : (
+                <Button
+                  variant="primary"
+                  size="lg"
+                  icon={stage === 'complete' ? <RotateCcw size={18} /> : <Play size={18} />}
+                  onClick={startSpeedTest}
+                >
+                  {stage === 'complete' ? 'Test Again' : 'Start Speed Test'}
+                </Button>
+              )}
+            </div>
+
+            {/* Data Consumption Disclaimer Notice */}
+            <div
+              style={{
+                fontSize: 12,
+                color: 'var(--text-muted)',
+                textAlign: 'center',
+                maxWidth: 480,
+                lineHeight: 1.5,
+              }}
+            >
+              Notice: Speed tests transfer genuine network payloads through your active adapter to
+              calculate true throughput. A full benchmark transfers approximately 25–80 MB of data.
             </div>
           </div>
         )}
       </section>
 
-      {/* Speed Test History Table & Empty State (Section 9 & Section 15) */}
+      {/* History Comparison Drawer (When 2 items selected) */}
+      {comparisonPair && (
+        <section
+          className="surface-panel"
+          style={{
+            border: '1px solid rgba(192, 132, 252, 0.4)',
+            background: 'var(--bg-surface-tinted)',
+          }}
+          aria-label="Comparison drawer"
+        >
+          <div className="surface-panel-header">
+            <div>
+              <h2 className="surface-panel-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Layers size={17} style={{ color: 'var(--brand-lilac)' }} />
+                <span>Benchmark Comparison</span>
+              </h2>
+              <p className="surface-panel-subtitle">
+                Side-by-side performance contrast between selected tests.
+              </p>
+            </div>
+            <Button variant="ghost" size="sm" onClick={() => setSelectedHistoryIds([])}>
+              Close Comparison
+            </Button>
+          </div>
+
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+              gap: 16,
+              padding: 16,
+            }}
+          >
+            <div style={{ padding: 14, borderRadius: 'var(--radius-md)', background: 'var(--bg-surface)' }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)' }}>TEST A · {comparisonPair.testA.date}</div>
+              <div style={{ fontSize: 13, marginTop: 4, fontWeight: 600 }}>{comparisonPair.testA.server}</div>
+              <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 4, fontSize: 13 }}>
+                <div>Download: <span className="mono" style={{ fontWeight: 700, color: 'var(--series-download)' }}>{comparisonPair.testA.downloadMbps.toFixed(1)} Mbps</span></div>
+                <div>Upload: <span className="mono" style={{ fontWeight: 700, color: 'var(--series-upload)' }}>{comparisonPair.testA.uploadMbps.toFixed(1)} Mbps</span></div>
+                <div>Ping: <span className="mono">{comparisonPair.testA.pingMs} ms</span> (Jitter: {comparisonPair.testA.jitterMs}ms)</div>
+              </div>
+            </div>
+
+            <div style={{ padding: 14, borderRadius: 'var(--radius-md)', background: 'var(--bg-surface)' }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)' }}>TEST B · {comparisonPair.testB.date}</div>
+              <div style={{ fontSize: 13, marginTop: 4, fontWeight: 600 }}>{comparisonPair.testB.server}</div>
+              <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 4, fontSize: 13 }}>
+                <div>Download: <span className="mono" style={{ fontWeight: 700, color: 'var(--series-download)' }}>{comparisonPair.testB.downloadMbps.toFixed(1)} Mbps</span></div>
+                <div>Upload: <span className="mono" style={{ fontWeight: 700, color: 'var(--series-upload)' }}>{comparisonPair.testB.uploadMbps.toFixed(1)} Mbps</span></div>
+                <div>Ping: <span className="mono">{comparisonPair.testB.pingMs} ms</span> (Jitter: {comparisonPair.testB.jitterMs}ms)</div>
+              </div>
+            </div>
+
+            <div style={{ padding: 14, borderRadius: 'var(--radius-md)', background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)' }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--brand-lilac)' }}>VARIANCE &amp; DELTA</div>
+              <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6, fontSize: 13 }}>
+                <div>
+                  Download Delta:{' '}
+                  <span className="mono" style={{ fontWeight: 700, color: comparisonPair.testA.downloadMbps >= comparisonPair.testB.downloadMbps ? 'var(--status-success)' : 'var(--series-upload)' }}>
+                    {(comparisonPair.testA.downloadMbps - comparisonPair.testB.downloadMbps > 0 ? '+' : '')}
+                    {(comparisonPair.testA.downloadMbps - comparisonPair.testB.downloadMbps).toFixed(1)} Mbps
+                  </span>
+                </div>
+                <div>
+                  Upload Delta:{' '}
+                  <span className="mono" style={{ fontWeight: 700 }}>
+                    {(comparisonPair.testA.uploadMbps - comparisonPair.testB.uploadMbps > 0 ? '+' : '')}
+                    {(comparisonPair.testA.uploadMbps - comparisonPair.testB.uploadMbps).toFixed(1)} Mbps
+                  </span>
+                </div>
+                <div>
+                  Ping Difference:{' '}
+                  <span className="mono">
+                    {Math.abs(comparisonPair.testA.pingMs - comparisonPair.testB.pingMs)} ms
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* Speed Test History Table */}
       <section className="surface-panel" aria-label="Speed test history">
-        <div className="surface-panel-header">
+        <div className="surface-panel-header" style={{ flexWrap: 'wrap', gap: 10 }}>
           <div>
-            <h2 className="surface-panel-title">Speed Test History</h2>
+            <h2 className="surface-panel-title">Persistent Benchmark History</h2>
             <p className="surface-panel-subtitle">
-              Real speed tests recorded on {networkInfo.hostname}.
+              Measured tests saved locally on {networkInfo.hostname}. Select 2 items to compare.
             </p>
           </div>
-          {speedTestHistory.length > 0 && (
-            <Button
-              variant="ghost"
-              size="sm"
-              icon={<Trash2 size={14} />}
-              onClick={clearSpeedTestHistory}
-            >
-              Clear History
-            </Button>
-          )}
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {speedTestHistory.length > 0 && (
+              <>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  icon={<DownloadCloud size={14} />}
+                  onClick={exportHistoryCSV}
+                >
+                  Export CSV
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  icon={<Trash2 size={14} />}
+                  onClick={clearSpeedTestHistory}
+                >
+                  Clear All
+                </Button>
+              </>
+            )}
+          </div>
         </div>
 
         {speedTestHistory.length === 0 ? (
           <EmptyStateBox
             icon={<Gauge size={24} />}
-            title="No Speed Tests Yet"
-            description="Run your first speed test to begin building your network history."
-            actionLabel="Start Speed Test"
+            title="No Speed Tests Recorded"
+            description="Run your first speed test above to establish a benchmark of your connection throughput."
+            actionLabel="Run First Benchmark"
             onAction={startSpeedTest}
           />
         ) : (
@@ -405,42 +839,90 @@ export const SpeedTestView: React.FC = () => {
             <table className="netx-table">
               <thead>
                 <tr>
-                  <th>Date &amp; Time</th>
-                  <th>Interface</th>
-                  <th>Test Server</th>
-                  <th>Ping</th>
-                  <th>Download</th>
-                  <th>Upload</th>
+                  <th style={{ width: 40 }}>Compare</th>
+                  <th
+                    style={{ cursor: 'pointer' }}
+                    onClick={() => {
+                      if (sortBy === 'date') setSortAsc(!sortAsc);
+                      else { setSortBy('date'); setSortAsc(false); }
+                    }}
+                  >
+                    Date &amp; Time {sortBy === 'date' && (sortAsc ? '▲' : '▼')}
+                  </th>
+                  <th>Interface &amp; Endpoint</th>
+                  <th
+                    style={{ cursor: 'pointer' }}
+                    onClick={() => {
+                      if (sortBy === 'ping') setSortAsc(!sortAsc);
+                      else { setSortBy('ping'); setSortAsc(false); }
+                    }}
+                  >
+                    Ping / Jitter {sortBy === 'ping' && (sortAsc ? '▲' : '▼')}
+                  </th>
+                  <th>Packet Loss</th>
+                  <th
+                    style={{ cursor: 'pointer' }}
+                    onClick={() => {
+                      if (sortBy === 'download') setSortAsc(!sortAsc);
+                      else { setSortBy('download'); setSortAsc(false); }
+                    }}
+                  >
+                    Download {sortBy === 'download' && (sortAsc ? '▲' : '▼')}
+                  </th>
+                  <th
+                    style={{ cursor: 'pointer' }}
+                    onClick={() => {
+                      if (sortBy === 'upload') setSortAsc(!sortAsc);
+                      else { setSortBy('upload'); setSortAsc(false); }
+                    }}
+                  >
+                    Upload {sortBy === 'upload' && (sortAsc ? '▲' : '▼')}
+                  </th>
+                  <th>Duration</th>
                 </tr>
               </thead>
               <tbody>
-                {speedTestHistory.map((item) => (
-                  <tr key={item.id}>
-                    <td style={{ fontWeight: 600 }}>{item.date}</td>
-                    <td>
-                      <StatusBadge variant="neutral" label={item.interfaceName} />
-                    </td>
-                    <td style={{ color: 'var(--text-secondary)' }}>
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                        <Server size={13} />
-                        <span>{item.server}</span>
-                      </span>
-                    </td>
-                    <td className="mono">{item.pingMs} ms</td>
-                    <td
-                      className="mono"
-                      style={{ fontWeight: 700, color: 'var(--series-download)' }}
-                    >
-                      ↓ {item.downloadMbps.toFixed(1)} Mbps
-                    </td>
-                    <td
-                      className="mono"
-                      style={{ fontWeight: 700, color: 'var(--series-upload)' }}
-                    >
-                      ↑ {item.uploadMbps.toFixed(1)} Mbps
-                    </td>
-                  </tr>
-                ))}
+                {sortedHistory.map((item) => {
+                  const isChecked = selectedHistoryIds.includes(item.id);
+                  return (
+                    <tr key={item.id} style={{ background: isChecked ? 'rgba(168, 85, 247, 0.08)' : undefined }}>
+                      <td>
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={() => toggleSelectHistory(item.id)}
+                          aria-label={`Select test on ${item.date} for comparison`}
+                        />
+                      </td>
+                      <td style={{ fontWeight: 600 }}>{item.date}</td>
+                      <td>
+                        <div style={{ fontWeight: 500 }}>{item.server}</div>
+                        <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>{item.interfaceName}</div>
+                      </td>
+                      <td className="mono">
+                        <div>{item.pingMs} ms</div>
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>±{item.jitterMs} ms</div>
+                      </td>
+                      <td className="mono">
+                        <span style={{ color: (item.packetLossPct ?? 0) > 0 ? 'var(--status-danger)' : 'var(--text-muted)' }}>
+                          {item.packetLossPct ?? 0}%
+                        </span>
+                      </td>
+                      <td className="mono" style={{ fontWeight: 700, color: 'var(--series-download)' }}>
+                        ↓ {item.downloadMbps.toFixed(1)} Mbps
+                      </td>
+                      <td className="mono" style={{ fontWeight: 700, color: 'var(--series-upload)' }}>
+                        ↑ {item.uploadMbps.toFixed(1)} Mbps
+                      </td>
+                      <td className="mono" style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                          <Clock size={12} />
+                          <span>{item.durationSec ? `${item.durationSec}s` : '—'}</span>
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -449,3 +931,5 @@ export const SpeedTestView: React.FC = () => {
     </div>
   );
 };
+
+export default SpeedTestView;

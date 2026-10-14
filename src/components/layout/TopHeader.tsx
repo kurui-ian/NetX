@@ -7,6 +7,7 @@ import {
   Globe,
   Laptop,
   LayoutGrid,
+  Minimize2,
   Moon,
   PanelRightClose,
   PanelRightOpen,
@@ -52,6 +53,10 @@ const PAGE_META: Record<NavSection, { title: string; subtitle: string }> = {
     title: 'Local Network & Adapters',
     subtitle: 'Connected LAN devices on your subnet and local network interface hardware.',
   },
+  gaming: {
+    title: 'Gaming & Latency Quality',
+    subtitle: 'High-frequency ping tracking, jitter analysis, packet loss monitor, and stability scoring.',
+  },
   tools: {
     title: 'Network Tools',
     subtitle: 'Interactive Ping, Traceroute, DNS Lookup, and Port Check utilities.',
@@ -59,6 +64,10 @@ const PAGE_META: Record<NavSection, { title: string; subtitle: string }> = {
   diagnostics: {
     title: 'Network Diagnostics',
     subtitle: 'Automated step-by-step connection health verification and troubleshooting.',
+  },
+  history: {
+    title: 'Incident & Event History',
+    subtitle: 'Audit trail of connectivity drops, latency excursions, and interface state changes.',
   },
   settings: {
     title: 'Settings',
@@ -70,12 +79,16 @@ interface TopHeaderProps {
   onOpenCommandPalette: () => void;
   isHudOpen: boolean;
   onToggleHud: () => void;
+  isMiniMonitorOpen?: boolean;
+  onToggleMiniMonitor?: () => void;
 }
 
 export const TopHeader: React.FC<TopHeaderProps> = ({
   onOpenCommandPalette,
   isHudOpen,
   onToggleHud,
+  isMiniMonitorOpen = false,
+  onToggleMiniMonitor,
 }) => {
   const {
     activeNav,
@@ -166,6 +179,19 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
             <span className="header-connection-ip mono">{networkInfo.ipv4}</span>
           </div>
         </div>
+
+        {/* Floating Mini Monitor Toggle Button */}
+        {onToggleMiniMonitor && (
+          <button
+            type="button"
+            className={`header-icon-btn ${isMiniMonitorOpen ? 'active' : ''}`}
+            onClick={onToggleMiniMonitor}
+            title={isMiniMonitorOpen ? 'Hide Mini Monitor' : 'Show Floating Mini Monitor'}
+            aria-label={isMiniMonitorOpen ? 'Hide Mini Monitor' : 'Show Floating Mini Monitor'}
+          >
+            <Minimize2 size={16} />
+          </button>
+        )}
 
         {/* HUD Toggle Button */}
         <button

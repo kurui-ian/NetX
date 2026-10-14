@@ -7,7 +7,9 @@ import {
   Cable,
   CheckCircle2,
   Clock,
+  Gamepad2,
   Gauge,
+  History,
   LayoutDashboard,
   Network,
   PanelLeftClose,
@@ -44,6 +46,7 @@ export const Sidebar: React.FC = () => {
     connections,
     speedTestHistory,
     lanDevices,
+    networkEvents,
   } = useNetX();
 
   const activeAppsCount = apps.filter((a) => a.status === 'active').length;
@@ -71,8 +74,15 @@ export const Sidebar: React.FC = () => {
       icon: <Network size={18} className="nav-icon" />,
       badge: lanDevices.length > 0 ? String(lanDevices.length) : undefined,
     },
+    { id: 'gaming', label: 'Gaming & Quality', icon: <Gamepad2 size={18} className="nav-icon" /> },
     { id: 'tools', label: 'Tools', icon: <Wrench size={18} className="nav-icon" /> },
     { id: 'diagnostics', label: 'Diagnostics', icon: <Stethoscope size={18} className="nav-icon" /> },
+    {
+      id: 'history',
+      label: 'Event History',
+      icon: <History size={18} className="nav-icon" />,
+      badge: networkEvents.length > 0 ? String(networkEvents.length) : undefined,
+    },
   ];
 
   // Dynamic Recent Activity items (mirrors "Recent Chats" in inspiration)

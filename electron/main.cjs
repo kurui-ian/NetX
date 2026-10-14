@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage } = require('electron');
+const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, dialog } = require('electron');
 const path = require('path');
 const os = require('os');
 const fs = require('fs');
@@ -870,184 +870,476 @@ ipcMain.handle('netx:scan-lan', async (_event, activeSweep = false) => {
 });
 
 // ============================================================================
-// IPC 5: Real Speed Test Engine against Cloudflare Edge (`netx:run-speed-test`)
+// IPC 5: Realistic Multi-Stage Speed Test Engine with Cancellation & Packet Loss
 // ============================================================================
-ipcMain.handle('netx:run-speed-test', async (event) => {
+let activeSpeedTest = null;
+
+ipcMain.handle('netx:cancel-speed-test', () => {
+  if (activeSpeedTest) {
+    activeSpeedTest.cancelled = true;
+    for (const req of activeSpeedTest.activeRequests) {
+      try {
+        req.destroy();
+      } catch {}
+    }
+    activeSpeedTest.activeRequests.clear();
+    activeSpeedTest = null;
+    return { ok: true, cancelled: true };
+  }
+  return { ok: true, cancelled: false };
+});
+
+ipcMain.handle('netx:run-speed-test', async (event, options = {}) => {
   const sendProgress = (payload) => {
     if (!event.sender.isDestroyed()) {
       event.sender.send('netx:speed-test-progress', payload);
     }
   };
 
+  const currentTest = {
+    cancelled: false,
+    activeRequests: new Set(),
+  };
+  activeSpeedTest = currentTest;
+
+  const checkCancelled = () => {
+    if (currentTest.cancelled) {
+      throw new Error('Speed test was cancelled by user.');
+    }
+  };
+
+  const testStartTime = Date.now();
+
   try {
-    // Stage 1: Real Ping & Jitter (4 probes to 1.1.1.1)
-    sendProgress({ stage: 'ping', progress: 5, liveValue: 0 });
+    // ------------------------------------------------------------------------
+    // Stage 1: Preparation (Verify connection & select measurement server)
+    // ------------------------------------------------------------------------
+    sendProgress({
+      stage: 'prep',
+      progress: 3,
+      liveValue: 0,
+      status: 'Checking network interfaces and selecting endpoint...',
+    });
+
+    const [ipConfig, pubIp, wifi] = await Promise.all([
+      getIpConfigDetails(),
+      fetchPublicIp(),
+      getWifiInterfaceInfo(),
+    ]);
+
+    checkCancelled();
+
+    if (!ipConfig.primaryIpv4 || ipConfig.primaryIpv4 === '127.0.0.1') {
+      throw new Error('No active network connection detected on your system.');
+    }
+
+    const endpointName = options.server || pubIp.isp || 'Cloudflare Anycast Global Edge';
+    sendProgress({
+      stage: 'prep',
+      progress: 8,
+      liveValue: 0,
+      server: endpointName,
+      status: `Connected to ${endpointName}. Warming up probes...`,
+    });
+
+    // Short stabilization delay (700ms)
+    await new Promise((r) => setTimeout(r, 700));
+    checkCancelled();
+
+    // ------------------------------------------------------------------------
+    // Stage 2: Latency, Jitter & Packet Loss Probes (8 real probes)
+    // ------------------------------------------------------------------------
+    sendProgress({
+      stage: 'ping',
+      progress: 10,
+      liveValue: 0,
+      server: endpointName,
+      status: 'Testing ping, jitter, and packet loss...',
+    });
+
     const pings = [];
-    for (let i = 0; i < 4; i++) {
-      const res = await measureQuickPing('1.1.1.1');
-      if (res.alive) pings.push(res.timeMs);
+    const totalProbes = 8;
+    let lostCount = 0;
+
+    for (let i = 0; i < totalProbes; i++) {
+      checkCancelled();
+      const probeRes = await measureQuickPing('1.1.1.1');
+      if (probeRes.alive) {
+        pings.push(probeRes.timeMs);
+      } else {
+        lostCount++;
+      }
+
+      const currAvg = pings.length > 0 ? Math.round(pings.reduce((a, b) => a + b, 0) / pings.length) : 0;
+      let currJitter = 0;
+      if (pings.length > 1) {
+        let diffSum = 0;
+        for (let j = 1; j < pings.length; j++) {
+          diffSum += Math.abs(pings[j] - pings[j - 1]);
+        }
+        currJitter = Math.round((diffSum / (pings.length - 1)) * 10) / 10;
+      }
+      const currLossPct = Math.round((lostCount / (i + 1)) * 100);
+
       sendProgress({
         stage: 'ping',
-        progress: 5 + (i + 1) * 4,
-        liveValue: res.timeMs || 20,
+        progress: 10 + Math.round(((i + 1) / totalProbes) * 14), // 10% -> 24%
+        liveValue: probeRes.alive ? probeRes.timeMs : currAvg,
+        pingMs: currAvg,
+        jitterMs: currJitter,
+        packetLossPct: currLossPct,
+        server: endpointName,
       });
+
+      await new Promise((r) => setTimeout(r, 120));
     }
+
+    checkCancelled();
 
     if (pings.length === 0) {
-      throw new Error('ICMP & HTTPS reachability check to 1.1.1.1 failed.');
+      throw new Error('All 8 latency probes failed. Check your gateway or DNS connection.');
     }
 
+    const minPing = Math.min(...pings);
+    const maxPing = Math.max(...pings);
     const avgPing = Math.round(pings.reduce((a, b) => a + b, 0) / pings.length);
-    let jitterSum = 0;
+    let jSum = 0;
     for (let i = 1; i < pings.length; i++) {
-      jitterSum += Math.abs(pings[i] - pings[i - 1]);
+      jSum += Math.abs(pings[i] - pings[i - 1]);
     }
-    const jitterMs =
-      pings.length > 1 ? Math.round((jitterSum / (pings.length - 1)) * 10) / 10 : 1.0;
+    const finalJitter = pings.length > 1 ? Math.round((jSum / (pings.length - 1)) * 10) / 10 : 1.0;
+    const finalPacketLoss = Math.round((lostCount / totalProbes) * 100);
 
-    // Stage 2: Real HTTPS Download Benchmark (speed.cloudflare.com/__down)
+    // ------------------------------------------------------------------------
+    // Stage 3: Multi-stream Download Benchmark (10–12 seconds real data transfer)
+    // ------------------------------------------------------------------------
     sendProgress({
       stage: 'download',
-      progress: 22,
+      progress: 25,
       liveValue: 0,
       pingMs: avgPing,
-      jitterMs,
+      jitterMs: finalJitter,
+      packetLossPct: finalPacketLoss,
+      server: endpointName,
+      status: 'Measuring download throughput across multiple streams...',
     });
+
+    const downloadSamples = [];
+    const downloadDurationMs = 11000; // 11 seconds target duration
+    const downloadStart = Date.now();
+    let totalDlBytes = 0;
+    let lastSampleBytes = 0;
+    let lastSampleTime = downloadStart;
+    let smoothedDlMbps = 0;
 
     const downloadMbps = await new Promise((resolve, reject) => {
-      let bytesReceived = 0;
-      const startTime = Date.now();
-      const durationLimitMs = 5500;
-      let finished = false;
+      let isDone = false;
+      const numStreams = 2; // Controlled 2-stream concurrency
 
       const finishDownload = () => {
-        if (finished) return;
-        finished = true;
-        const elapsedSec = Math.max(0.2, (Date.now() - startTime) / 1000);
-        const mbps = Math.round(((bytesReceived * 8) / (elapsedSec * 1_000_000)) * 10) / 10;
-        resolve(mbps);
+        if (isDone) return;
+        isDone = true;
+        clearInterval(sampleTicker);
+        for (const req of currentTest.activeRequests) {
+          try {
+            req.destroy();
+          } catch {}
+        }
+        currentTest.activeRequests.clear();
+
+        // Calculate final sustained download speed (exclude first 1.5s slow-start)
+        const validSamples = downloadSamples.filter((s) => s.sec >= 1.5 && s.mbps > 0);
+        let finalMbps = 0;
+        if (validSamples.length >= 3) {
+          const sorted = validSamples.map((s) => s.mbps).sort((a, b) => a - b);
+          // 85th percentile sustained throughput
+          const p85Idx = Math.floor(sorted.length * 0.85);
+          finalMbps = sorted[p85Idx];
+        } else {
+          const elapsedSec = Math.max(0.5, (Date.now() - downloadStart) / 1000);
+          finalMbps = Math.round(((totalDlBytes * 8) / (elapsedSec * 1_000_000)) * 10) / 10;
+        }
+
+        resolve(Math.max(0.1, Math.round(finalMbps * 10) / 10));
       };
 
-      const req = https.get(
-        'https://speed.cloudflare.com/__down?bytes=25000000',
-        { timeout: 8000 },
-        (res) => {
-          res.on('data', (chunk) => {
-            bytesReceived += chunk.length;
-            const elapsed = Date.now() - startTime;
-            if (elapsed > 150) {
-              const liveMbps =
-                Math.round(((bytesReceived * 8) / ((elapsed / 1000) * 1_000_000)) * 10) / 10;
-              const pct = Math.min(64, 22 + Math.round((elapsed / durationLimitMs) * 42));
-              sendProgress({
-                stage: 'download',
-                progress: pct,
-                liveValue: liveMbps,
-                pingMs: avgPing,
-                jitterMs,
+      const startStream = () => {
+        if (isDone || currentTest.cancelled) return;
+        try {
+          const req = https.get(
+            'https://speed.cloudflare.com/__down?bytes=50000000',
+            { timeout: 14000 },
+            (res) => {
+              res.on('data', (chunk) => {
+                if (isDone || currentTest.cancelled) return;
+                totalDlBytes += chunk.length;
+              });
+              res.on('end', () => {
+                if (!isDone && !currentTest.cancelled && Date.now() - downloadStart < downloadDurationMs) {
+                  startStream(); // Replenish stream until duration completes
+                }
+              });
+              res.on('error', () => {
+                if (!isDone && !currentTest.cancelled && Date.now() - downloadStart < downloadDurationMs) {
+                  startStream();
+                }
               });
             }
-            if (elapsed >= durationLimitMs) {
-              req.destroy();
-              finishDownload();
-            }
-          });
-          res.on('end', finishDownload);
-          res.on('error', finishDownload);
-        }
-      );
-
-      req.on('error', (err) => {
-        if (bytesReceived > 0) finishDownload();
-        else reject(err);
-      });
-    });
-
-    // Stage 3: Real HTTPS Upload Benchmark (speed.cloudflare.com/__up)
-    sendProgress({
-      stage: 'upload',
-      progress: 66,
-      liveValue: 0,
-      pingMs: avgPing,
-      jitterMs,
-      downloadMbps,
-    });
-
-    const uploadMbps = await new Promise((resolve) => {
-      const payloadSize = 2 * 1024 * 1024; // 2 MB buffer
-      const chunkSize = 64 * 1024;
-      const buf = Buffer.alloc(chunkSize, 'x');
-      let bytesSent = 0;
-      const startTime = Date.now();
-
-      const req = https.request(
-        'https://speed.cloudflare.com/__up',
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/octet-stream',
-            'Content-Length': payloadSize,
-          },
-          timeout: 7000,
-        },
-        (res) => {
-          res.on('data', () => {});
-          res.on('end', () => {
-            const elapsedSec = Math.max(0.15, (Date.now() - startTime) / 1000);
-            const mbps = Math.round(((bytesSent * 8) / (elapsedSec * 1_000_000)) * 10) / 10;
-            resolve(mbps);
-          });
-        }
-      );
-
-      req.on('error', () => {
-        const elapsedSec = Math.max(0.15, (Date.now() - startTime) / 1000);
-        const mbps = Math.round(((bytesSent * 8) / (elapsedSec * 1_000_000)) * 10) / 10;
-        resolve(mbps);
-      });
-
-      const writeNext = () => {
-        while (bytesSent < payloadSize) {
-          const ok = req.write(buf);
-          bytesSent += chunkSize;
-          const elapsed = Math.max(50, Date.now() - startTime);
-          const liveMbps =
-            Math.round(((bytesSent * 8) / ((elapsed / 1000) * 1_000_000)) * 10) / 10;
-          const pct = Math.min(98, 66 + Math.round((bytesSent / payloadSize) * 32));
-          sendProgress({
-            stage: 'upload',
-            progress: pct,
-            liveValue: liveMbps,
-            pingMs: avgPing,
-            jitterMs,
-            downloadMbps,
-          });
-          if (!ok) {
-            req.once('drain', writeNext);
-            return;
-          }
-        }
-        req.end();
+          );
+          req.on('error', () => {});
+          currentTest.activeRequests.add(req);
+        } catch {}
       };
 
-      writeNext();
+      // Launch parallel streams
+      for (let s = 0; s < numStreams; s++) {
+        startStream();
+      }
+
+      // Sample every 250ms
+      const sampleTicker = setInterval(() => {
+        if (currentTest.cancelled) {
+          finishDownload();
+          reject(new Error('Speed test was cancelled by user.'));
+          return;
+        }
+
+        const now = Date.now();
+        const elapsedTotal = (now - downloadStart) / 1000;
+        const deltaSec = (now - lastSampleTime) / 1000;
+        const deltaBytes = Math.max(0, totalDlBytes - lastSampleBytes);
+
+        lastSampleTime = now;
+        lastSampleBytes = totalDlBytes;
+
+        const instantMbps = deltaSec > 0 ? (deltaBytes * 8) / (deltaSec * 1_000_000) : 0;
+        if (smoothedDlMbps === 0) {
+          smoothedDlMbps = instantMbps;
+        } else {
+          smoothedDlMbps = smoothedDlMbps * 0.65 + instantMbps * 0.35;
+        }
+
+        const currentLive = Math.round(smoothedDlMbps * 10) / 10;
+        downloadSamples.push({ sec: Math.round(elapsedTotal * 10) / 10, mbps: currentLive });
+
+        const pct = Math.min(62, 25 + Math.round((elapsedTotal / (downloadDurationMs / 1000)) * 37));
+        sendProgress({
+          stage: 'download',
+          progress: pct,
+          liveValue: currentLive,
+          pingMs: avgPing,
+          jitterMs: finalJitter,
+          packetLossPct: finalPacketLoss,
+          server: endpointName,
+          samples: downloadSamples.slice(-25),
+        });
+
+        if (now - downloadStart >= downloadDurationMs) {
+          finishDownload();
+        }
+      }, 250);
     });
 
-    const wifi = await getWifiInterfaceInfo();
-    const pubIp = await fetchPublicIp();
+    checkCancelled();
+
+    // ------------------------------------------------------------------------
+    // Stage 4: Multi-stream Upload Benchmark (8–10 seconds real data transfer)
+    // ------------------------------------------------------------------------
+    sendProgress({
+      stage: 'upload',
+      progress: 63,
+      liveValue: 0,
+      downloadMbps,
+      pingMs: avgPing,
+      jitterMs: finalJitter,
+      packetLossPct: finalPacketLoss,
+      server: endpointName,
+      status: 'Measuring upload throughput...',
+    });
+
+    const uploadSamples = [];
+    const uploadDurationMs = 8500; // 8.5s target
+    const uploadStart = Date.now();
+    let totalUlBytes = 0;
+    let lastUlSampleBytes = 0;
+    let lastUlSampleTime = uploadStart;
+    let smoothedUlMbps = 0;
+
+    const uploadMbps = await new Promise((resolve, reject) => {
+      let isDone = false;
+      const chunkSize = 64 * 1024;
+      const chunkBuf = Buffer.alloc(chunkSize, 'Z');
+
+      const finishUpload = () => {
+        if (isDone) return;
+        isDone = true;
+        clearInterval(sampleTicker);
+        for (const req of currentTest.activeRequests) {
+          try {
+            req.destroy();
+          } catch {}
+        }
+        currentTest.activeRequests.clear();
+
+        const validSamples = uploadSamples.filter((s) => s.sec >= 1.2 && s.mbps > 0);
+        let finalMbps = 0;
+        if (validSamples.length >= 3) {
+          const sorted = validSamples.map((s) => s.mbps).sort((a, b) => a - b);
+          const p85Idx = Math.floor(sorted.length * 0.85);
+          finalMbps = sorted[p85Idx];
+        } else {
+          const elapsedSec = Math.max(0.5, (Date.now() - uploadStart) / 1000);
+          finalMbps = Math.round(((totalUlBytes * 8) / (elapsedSec * 1_000_000)) * 10) / 10;
+        }
+
+        resolve(Math.max(0.1, Math.round(finalMbps * 10) / 10));
+      };
+
+      const startUploadStream = () => {
+        if (isDone || currentTest.cancelled) return;
+        try {
+          const req = https.request(
+            'https://speed.cloudflare.com/__up',
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/octet-stream',
+              },
+              timeout: 10000,
+            },
+            (res) => {
+              res.on('data', () => {});
+              res.on('end', () => {
+                if (!isDone && !currentTest.cancelled && Date.now() - uploadStart < uploadDurationMs) {
+                  startUploadStream();
+                }
+              });
+            }
+          );
+
+          req.on('error', () => {
+            if (!isDone && !currentTest.cancelled && Date.now() - uploadStart < uploadDurationMs) {
+              startUploadStream();
+            }
+          });
+
+          currentTest.activeRequests.add(req);
+
+          const pump = () => {
+            if (isDone || currentTest.cancelled) {
+              try {
+                req.end();
+              } catch {}
+              return;
+            }
+            while (Date.now() - uploadStart < uploadDurationMs) {
+              const canWrite = req.write(chunkBuf);
+              totalUlBytes += chunkSize;
+              if (!canWrite) {
+                req.once('drain', pump);
+                return;
+              }
+            }
+            req.end();
+          };
+
+          pump();
+        } catch {}
+      };
+
+      // Launch 2 parallel upload streams
+      startUploadStream();
+      startUploadStream();
+
+      // Sample ticker every 250ms
+      const sampleTicker = setInterval(() => {
+        if (currentTest.cancelled) {
+          finishUpload();
+          reject(new Error('Speed test was cancelled by user.'));
+          return;
+        }
+
+        const now = Date.now();
+        const elapsedTotal = (now - uploadStart) / 1000;
+        const deltaSec = (now - lastUlSampleTime) / 1000;
+        const deltaBytes = Math.max(0, totalUlBytes - lastUlSampleBytes);
+
+        lastUlSampleTime = now;
+        lastUlSampleBytes = totalUlBytes;
+
+        const instantMbps = deltaSec > 0 ? (deltaBytes * 8) / (deltaSec * 1_000_000) : 0;
+        if (smoothedUlMbps === 0) {
+          smoothedUlMbps = instantMbps;
+        } else {
+          smoothedUlMbps = smoothedUlMbps * 0.65 + instantMbps * 0.35;
+        }
+
+        const currentLive = Math.round(smoothedUlMbps * 10) / 10;
+        uploadSamples.push({ sec: Math.round(elapsedTotal * 10) / 10, mbps: currentLive });
+
+        const pct = Math.min(97, 63 + Math.round((elapsedTotal / (uploadDurationMs / 1000)) * 34));
+        sendProgress({
+          stage: 'upload',
+          progress: pct,
+          liveValue: currentLive,
+          downloadMbps,
+          pingMs: avgPing,
+          jitterMs: finalJitter,
+          packetLossPct: finalPacketLoss,
+          server: endpointName,
+          samples: uploadSamples.slice(-25),
+        });
+
+        if (now - uploadStart >= uploadDurationMs) {
+          finishUpload();
+        }
+      }, 250);
+    });
+
+    checkCancelled();
+
+    // ------------------------------------------------------------------------
+    // Stage 5: Finalization & Metrics Collation
+    // ------------------------------------------------------------------------
+    sendProgress({
+      stage: 'finalizing',
+      progress: 99,
+      liveValue: 0,
+      downloadMbps,
+      uploadMbps,
+      pingMs: avgPing,
+      jitterMs: finalJitter,
+      packetLossPct: finalPacketLoss,
+      server: endpointName,
+      status: 'Finalizing benchmark calculations...',
+    });
+
+    await new Promise((r) => setTimeout(r, 600));
+
+    const totalDurationSec = Math.round((Date.now() - testStartTime) / 1000);
+    activeSpeedTest = null;
 
     return {
       ok: true,
       pingMs: avgPing,
-      jitterMs,
+      minPingMs: minPing,
+      maxPingMs: maxPing,
+      jitterMs: finalJitter,
+      packetLossPct: finalPacketLoss,
       downloadMbps,
       uploadMbps,
-      server: pubIp.isp || 'Cloudflare Speed Edge',
-      interfaceName: wifi?.connected ? `Wi-Fi (${wifi.ssid})` : 'Primary Adapter',
+      durationSec: totalDurationSec,
+      server: endpointName,
+      interfaceName: wifi?.connected ? `Wi-Fi (${wifi.ssid})` : ipConfig.primaryName || 'Primary Adapter',
+      timestamp: new Date().toISOString(),
+      downloadHistory: downloadSamples,
+      uploadHistory: uploadSamples,
     };
   } catch (err) {
+    activeSpeedTest = null;
     return {
       ok: false,
+      cancelled: currentTest.cancelled || /cancelled/i.test(err.message),
       error: err.message || String(err),
     };
   }
@@ -1137,16 +1429,20 @@ ipcMain.handle('netx:run-diagnostic-step', async (_event, stepId) => {
 });
 
 // ============================================================================
-// IPC 7: Real Network Tools (`netx:run-tool`: ping, traceroute, dns, port)
+// IPC 7: Real Network Tools (`netx:run-tool`: ping, route, traceroute, dns, port)
 // ============================================================================
-ipcMain.handle('netx:run-tool', async (_event, { tool, target }) => {
+ipcMain.handle('netx:run-tool', async (_event, { tool, target, options = {} }) => {
   const cleanTarget = String(target || 'cloudflare.com')
     .replace(/[^a-zA-Z0-9.-]/g, '')
     .trim();
 
   if (tool === 'ping') {
+    const count = Math.min(30, Math.max(1, parseInt(options.count, 10) || 4));
+    const timeout = Math.min(5000, Math.max(300, parseInt(options.timeout, 10) || 2000));
     try {
-      const { stdout } = await execAsync(`ping -n 4 -w 2000 ${cleanTarget}`, { timeout: 10000 });
+      const { stdout } = await execAsync(`ping -n ${count} -w ${timeout} ${cleanTarget}`, {
+        timeout: count * timeout + 6000,
+      });
       const rows = [];
       const lines = stdout.split(/\r?\n/);
       let seq = 1;
@@ -1172,9 +1468,69 @@ ipcMain.handle('netx:run-tool', async (_event, { tool, target }) => {
           });
         }
       }
-      return { ok: true, rows, raw: stdout };
+
+      // Parse summary statistics
+      let summary = null;
+      const sentMatch = stdout.match(/Packets: Sent = (\d+), Received = (\d+), Lost = (\d+)\s*\(([\d.]+)% loss\)/i);
+      const rttMatch = stdout.match(/Minimum = (\d+)ms, Maximum = (\d+)ms, Average = (\d+)ms/i);
+      if (sentMatch) {
+        summary = {
+          sent: parseInt(sentMatch[1], 10),
+          received: parseInt(sentMatch[2], 10),
+          lost: parseInt(sentMatch[3], 10),
+          lossPct: parseFloat(sentMatch[4]),
+          minMs: rttMatch ? parseInt(rttMatch[1], 10) : 0,
+          maxMs: rttMatch ? parseInt(rttMatch[2], 10) : 0,
+          avgMs: rttMatch ? parseInt(rttMatch[3], 10) : 0,
+        };
+      }
+
+      return { ok: true, rows, summary, raw: stdout };
     } catch (err) {
       return { ok: false, rows: [], raw: err.stdout || String(err) };
+    }
+  }
+
+  if (tool === 'route') {
+    try {
+      const { stdout } = await execAsync('route print -4', { timeout: 8000 });
+      const routeLines = stdout.split(/\r?\n/);
+      let inActiveRoutes = false;
+      const routes = [];
+
+      for (const line of routeLines) {
+        const trimmed = line.trim();
+        if (/^Active Routes:/i.test(trimmed)) {
+          inActiveRoutes = true;
+          continue;
+        }
+        if (
+          inActiveRoutes &&
+          (/^Persistent Routes:/i.test(trimmed) ||
+            /^IPv6/i.test(trimmed) ||
+            (trimmed.startsWith('==') && routes.length > 0))
+        ) {
+          inActiveRoutes = false;
+          break;
+        }
+        if (inActiveRoutes) {
+          if (!trimmed || trimmed.startsWith('==') || /^Network Destination/i.test(trimmed)) continue;
+          const parts = trimmed.split(/\s+/);
+          if (parts.length >= 5) {
+            routes.push({
+              destination: parts[0],
+              netmask: parts[1],
+              gateway: parts[2],
+              interfaceIp: parts[3],
+              metric: parseInt(parts[4], 10) || 0,
+            });
+          }
+        }
+      }
+
+      return { ok: true, routes, raw: stdout };
+    } catch (err) {
+      return { ok: false, routes: [], raw: err.stdout || String(err) };
     }
   }
 
@@ -1287,6 +1643,38 @@ ipcMain.handle('netx:run-tool', async (_event, { tool, target }) => {
 });
 
 // ============================================================================
+// IPC 8: Export Diagnostic Report (`netx:export-diagnostic-report`)
+// ============================================================================
+ipcMain.handle('netx:export-diagnostic-report', async (_event, { reportData, format = 'json' }) => {
+  try {
+    const isJson = format === 'json';
+    const ext = isJson ? 'json' : 'txt';
+    const filterName = isJson ? 'JSON Report (*.json)' : 'Diagnostic Report (*.txt)';
+    const dateStr = new Date().toISOString().slice(0, 10);
+    const defaultFileName = `NetX-Diagnostic-Report-${dateStr}.${ext}`;
+
+    const saveRes = await dialog.showSaveDialog(mainWindow, {
+      title: 'Save NetX Network Diagnostic Report',
+      defaultPath: defaultFileName,
+      filters: [
+        { name: filterName, extensions: [ext] },
+        { name: 'All Files', extensions: ['*'] },
+      ],
+    });
+
+    if (saveRes.canceled || !saveRes.filePath) {
+      return { ok: false, cancelled: true };
+    }
+
+    const content = typeof reportData === 'string' ? reportData : JSON.stringify(reportData, null, 2);
+    fs.writeFileSync(saveRes.filePath, content, 'utf8');
+    return { ok: true, filePath: saveRes.filePath };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+});
+
+// ============================================================================
 // IPC 8: Windows Startup Setting & History Management
 // ============================================================================
 ipcMain.handle('netx:set-startup', (_event, { enabled, minimized }) => {
@@ -1312,6 +1700,42 @@ ipcMain.handle('netx:clear-usage-history', () => {
   };
   saveUsageStore();
   return { ok: true };
+});
+
+let normalWindowBounds = null;
+
+ipcMain.handle('netx:toggle-mini-mode', (_event, enableMini) => {
+  if (!mainWindow) return { ok: false };
+  try {
+    if (enableMini) {
+      normalWindowBounds = mainWindow.getBounds();
+      mainWindow.setAlwaysOnTop(true, 'screen-saver');
+      mainWindow.setMinimumSize(300, 180);
+      mainWindow.setSize(340, 230);
+      return { ok: true, mini: true };
+    } else {
+      mainWindow.setAlwaysOnTop(false);
+      mainWindow.setMinimumSize(920, 640);
+      if (normalWindowBounds) {
+        mainWindow.setBounds(normalWindowBounds);
+      } else {
+        mainWindow.setSize(1300, 840);
+      }
+      return { ok: true, mini: false };
+    }
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+});
+
+ipcMain.handle('netx:set-always-on-top', (_event, flag) => {
+  if (!mainWindow) return { ok: false };
+  try {
+    mainWindow.setAlwaysOnTop(Boolean(flag));
+    return { ok: true, isAlwaysOnTop: mainWindow.isAlwaysOnTop() };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
 });
 
 ipcMain.handle('netx:quit-app', () => {

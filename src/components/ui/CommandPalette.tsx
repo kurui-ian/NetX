@@ -8,8 +8,10 @@ import {
   Check,
   Command,
   Copy,
+  Gamepad2,
   Gauge,
   Globe,
+  History,
   LayoutDashboard,
   Moon,
   Network,
@@ -159,6 +161,18 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
       keywords: ['lan', 'arp', 'devices', 'subnet', 'adapters', 'mac'],
     },
     {
+      id: 'view-gaming',
+      title: 'Gaming & Quality Mode',
+      subtitle: 'Continuous latency tracking, jitter, stability score, and session logging',
+      category: 'Views',
+      icon: <Gamepad2 size={16} />,
+      action: () => {
+        setActiveNav('gaming');
+        onClose();
+      },
+      keywords: ['game', 'ping', 'jitter', 'stability', 'esports', 'packet loss'],
+    },
+    {
       id: 'view-tools',
       title: 'Network Tools',
       subtitle: 'Ping, Traceroute, DNS Lookup, and TCP Port Checker',
@@ -181,6 +195,18 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
         onClose();
       },
       keywords: ['troubleshoot', 'health', 'fix', 'audit', 'check'],
+    },
+    {
+      id: 'view-history',
+      title: 'Incident & Event History',
+      subtitle: 'Review disconnects, latency spikes, threshold alerts, and adapter events',
+      category: 'Views',
+      icon: <History size={16} />,
+      action: () => {
+        setActiveNav('history');
+        onClose();
+      },
+      keywords: ['log', 'history', 'incidents', 'events', 'disconnects', 'alerts'],
     },
     {
       id: 'view-settings',

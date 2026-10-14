@@ -1,7 +1,16 @@
 import React, { useState, useMemo } from 'react';
-import { ArrowDownRight, ArrowUpRight, BarChart3, Calendar, RotateCcw } from 'lucide-react';
+import {
+  ArrowDownRight,
+  ArrowUpRight,
+  BarChart3,
+  Calendar,
+  RotateCcw,
+  DownloadCloud,
+  TrendingUp,
+  AlertTriangle,
+} from 'lucide-react';
 import { useNetX } from '../context/NetXContext';
-import { MetricTile, StatusBadge } from '../components/ui/Primitives';
+import { MetricTile, StatusBadge, Button } from '../components/ui/Primitives';
 
 type UsageRange = 'day' | 'week' | 'month';
 
@@ -22,10 +31,23 @@ export const DataUsageView: React.FC = () => {
     settings,
     apps,
     networkInfo,
+    pushToast,
   } = useNetX();
 
   const [range, setRange] = useState<UsageRange>('day');
   const [resetting, setResetting] = useState(false);
+
+  // Month Forecasting & Budget calculations
+  const now = new Date();
+  const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  const daysElapsed = Math.max(1, now.getDate());
+  const daysRemaining = Math.max(0, daysInMonth - daysElapsed);
+  const dailyRunRateGb = monthUsageGb / daysElapsed;
+  const projectedMonthEndGb = Math.round(dailyRunRateGb * daysInMonth * 10) / 10;
+  const monthlyCap = settings.monthlyCapGb || 500;
+  const projectedCapPct = Math.min(999, Math.round((projectedMonthEndGb / monthlyCap) * 100));
+  const currentCapPct = Math.min(100, Math.round((monthUsageGb / monthlyCap) * 100));
+  const isOverCapProjected = projectedMonthEndGb > monthlyCap;
 
   const handleRecalibrate = async () => {
     if (window.confirm('Reset data usage counters to 0 GB and recalibrate?')) {
@@ -33,6 +55,31 @@ export const DataUsageView: React.FC = () => {
       await clearUsageHistory();
       setResetting(false);
     }
+  };
+
+  const exportUsageCSV = () => {
+    if (!usageStore?.daily || Object.keys(usageStore.daily).length === 0) {
+      pushToast('No historical daily records to export.', 'warning');
+      return;
+    }
+    const headers = ['Date', 'Download (GB)', 'Upload (GB)', 'Total (GB)'];
+    const rows = Object.entries(usageStore.daily)
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([date, b]) => {
+        const dlGb = (b.rxBytes / 1_073_741_824).toFixed(4);
+        const ulGb = (b.txBytes / 1_073_741_824).toFixed(4);
+        const totGb = ((b.rxBytes + b.txBytes) / 1_073_741_824).toFixed(4);
+        return [date, dlGb, ulGb, totGb].join(',');
+      });
+    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows].join('\n');
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement('a');
+    link.setAttribute('href', encodedUri);
+    link.setAttribute('download', `NetX-DataUsage-${new Date().toISOString().slice(0, 7)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    pushToast('Exported daily data usage to CSV.', 'success');
   };
 
   // Build real bars from the persistent usageStore recorded on disk
@@ -156,6 +203,81 @@ export const DataUsageView: React.FC = () => {
         />
       </section>
 
+      {/* Forecasting & Allowance Projection Panel (Section 5) */}
+      <section className="surface-panel" aria-label="Usage forecast and budget">
+        <div className="surface-panel-header" style={{ flexWrap: 'wrap', gap: 10 }}>
+          <div>
+            <h2 className="surface-panel-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <TrendingUp size={18} style={{ color: 'var(--brand-mint)' }} />
+              <span>Data Allowance &amp; Month-End Forecast</span>
+            </h2>
+            <p className="surface-panel-subtitle">
+              Calculated run rate based on {daysElapsed} days elapsed in {now.toLocaleString('default', { month: 'long' })} ({daysRemaining} days remaining).
+            </p>
+          </div>
+          <StatusBadge
+            variant={isOverCapProjected ? 'warning' : 'success'}
+            iconStyle="check"
+            label={isOverCapProjected ? 'Projected Over Budget' : 'Within Plan Allowance'}
+          />
+        </div>
+
+        <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 14 }}>
+            <div style={{ padding: 12, borderRadius: 'var(--radius-sm)', background: 'var(--bg-surface-subtle)' }}>
+              <div style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--text-muted)' }}>CURRENT CONSUMPTION</div>
+              <div className="tabular-nums" style={{ fontSize: 22, fontWeight: 800, marginTop: 4 }}>
+                {monthUsageGb.toFixed(2)} <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>GB ({currentCapPct}%)</span>
+              </div>
+            </div>
+
+            <div style={{ padding: 12, borderRadius: 'var(--radius-sm)', background: 'var(--bg-surface-subtle)' }}>
+              <div style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--text-muted)' }}>DAILY RUN RATE</div>
+              <div className="tabular-nums" style={{ fontSize: 22, fontWeight: 800, marginTop: 4 }}>
+                {dailyRunRateGb.toFixed(2)} <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>GB / day</span>
+              </div>
+            </div>
+
+            <div style={{ padding: 12, borderRadius: 'var(--radius-sm)', background: 'var(--bg-surface-subtle)' }}>
+              <div style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--text-muted)' }}>ESTIMATED MONTH-END</div>
+              <div className="tabular-nums" style={{ fontSize: 22, fontWeight: 800, marginTop: 4, color: isOverCapProjected ? 'var(--status-danger)' : 'var(--brand-mint)' }}>
+                {projectedMonthEndGb.toFixed(1)} <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>GB ({projectedCapPct}%)</span>
+              </div>
+            </div>
+
+            <div style={{ padding: 12, borderRadius: 'var(--radius-sm)', background: 'var(--bg-surface-subtle)' }}>
+              <div style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--text-muted)' }}>MONTHLY DATA CAP</div>
+              <div className="tabular-nums" style={{ fontSize: 22, fontWeight: 800, marginTop: 4 }}>
+                {monthlyCap} <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>GB cap</span>
+              </div>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div className="progress-track" style={{ height: 10 }}>
+              <div
+                className="progress-fill"
+                style={{
+                  width: `${Math.min(100, currentCapPct)}%`,
+                  background: isOverCapProjected
+                    ? 'linear-gradient(90deg, #38bdf8 0%, #f43f5e 100%)'
+                    : 'linear-gradient(90deg, #a855f7 0%, #2dd4bf 100%)',
+                }}
+              />
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: 'var(--text-muted)' }}>
+              <span>Consumed: {monthUsageGb.toFixed(1)} GB of {monthlyCap} GB</span>
+              <span>Projected: {projectedMonthEndGb.toFixed(1)} GB by month-end</span>
+            </div>
+          </div>
+
+          <div style={{ fontSize: 11.5, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 6, fontStyle: 'italic' }}>
+            <AlertTriangle size={13} style={{ color: 'var(--brand-amber)' }} />
+            <span>Notice: Month-end usage is an automated mathematical projection based on your daily rate of consumption; it is not measured traffic.</span>
+          </div>
+        </div>
+      </section>
+
       {/* Historical Usage Graph with Day / Week / Month Switcher (Section 12) */}
       <section className="surface-panel" aria-label="Historical data usage graph">
         <div className="surface-panel-header">
@@ -183,6 +305,15 @@ export const DataUsageView: React.FC = () => {
                 </button>
               ))}
             </div>
+
+            <Button
+              variant="secondary"
+              size="sm"
+              icon={<DownloadCloud size={13} />}
+              onClick={exportUsageCSV}
+            >
+              Export CSV
+            </Button>
 
             <button
               type="button"

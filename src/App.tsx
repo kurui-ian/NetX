@@ -4,6 +4,7 @@ import { NetXProvider, useNetX } from './context/NetXContext';
 import { Sidebar } from './components/layout/Sidebar';
 import { TopHeader } from './components/layout/TopHeader';
 import { TelemetryHUD } from './components/layout/TelemetryHUD';
+import { MiniMonitor } from './components/layout/MiniMonitor';
 import { CommandPalette } from './components/ui/CommandPalette';
 import { DashboardView } from './views/DashboardView';
 import { SpeedTestView } from './views/SpeedTestView';
@@ -15,6 +16,8 @@ import { NetworkView } from './views/NetworkView';
 import { ToolsView } from './views/ToolsView';
 import { DiagnosticsView } from './views/DiagnosticsView';
 import { SettingsView } from './views/SettingsView';
+import { GamingModeView } from './views/GamingModeView';
+import { NetworkHistoryView } from './views/NetworkHistoryView';
 
 const NetXShell: React.FC = () => {
   const { activeNav, sidebarCollapsed, toasts } = useNetX();
@@ -28,6 +31,15 @@ const NetXShell: React.FC = () => {
     }
   });
 
+  const [isMiniMonitorOpen, setIsMiniMonitorOpen] = useState<boolean>(() => {
+    try {
+      const stored = localStorage.getItem('netx-mini-open');
+      return stored === 'true';
+    } catch {
+      return false;
+    }
+  });
+
   const [isCommandOpen, setIsCommandOpen] = useState<boolean>(false);
 
   const toggleHud = () => {
@@ -38,6 +50,16 @@ const NetXShell: React.FC = () => {
       } catch {
         // ignore
       }
+      return next;
+    });
+  };
+
+  const toggleMiniMonitor = () => {
+    setIsMiniMonitorOpen((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem('netx-mini-open', String(next));
+      } catch {}
       return next;
     });
   };
@@ -70,10 +92,14 @@ const NetXShell: React.FC = () => {
         return <WifiView />;
       case 'network':
         return <NetworkView />;
+      case 'gaming':
+        return <GamingModeView />;
       case 'tools':
         return <ToolsView />;
       case 'diagnostics':
         return <DiagnosticsView />;
+      case 'history':
+        return <NetworkHistoryView />;
       case 'settings':
         return <SettingsView />;
       default:
@@ -96,6 +122,8 @@ const NetXShell: React.FC = () => {
           onOpenCommandPalette={() => setIsCommandOpen(true)}
           isHudOpen={isHudOpen}
           onToggleHud={toggleHud}
+          isMiniMonitorOpen={isMiniMonitorOpen}
+          onToggleMiniMonitor={toggleMiniMonitor}
         />
         <main className="main-scroll" id="main-content">
           {renderActiveView()}
@@ -105,7 +133,10 @@ const NetXShell: React.FC = () => {
       {/* 3. Right Telemetry & Engine HUD Sidebar (Matching Inspiration Mockup) */}
       <TelemetryHUD isOpen={isHudOpen} onClose={() => setIsHudOpen(false)} />
 
-      {/* 4. Global Command Palette Modal (Ctrl + K) */}
+      {/* 4. Floating Mini Monitor Widget */}
+      <MiniMonitor isOpen={isMiniMonitorOpen} onClose={() => setIsMiniMonitorOpen(false)} />
+
+      {/* 5. Global Command Palette Modal (Ctrl + K) */}
       <CommandPalette isOpen={isCommandOpen} onClose={() => setIsCommandOpen(false)} />
 
       {/* 5. Subtle Toast Notifications */}
