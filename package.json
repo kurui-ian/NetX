@@ -2,7 +2,7 @@
   "name": "netx",
   "productName": "NetX",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "NetX — Modern Desktop Network Utility & Telemetry Suite",
   "main": "electron/main.cjs",
   "type": "module",
