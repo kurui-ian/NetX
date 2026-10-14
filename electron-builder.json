@@ -1,0 +1,35 @@
+{
+  "$schema": "https://raw.githubusercontent.com/electron-userland/electron-builder/master/packages/app-builder-lib/scheme.json",
+  "appId": "com.netx.desktop",
+  "productName": "NetX",
+  "copyright": "Copyright © 2026 NetX",
+  "directories": {
+    "output": "release-installer"
+  },
+  "files": [
+    "dist/**/*",
+    "electron/**/*",
+    "public/**/*",
+    "package.json"
+  ],
+  "win": {
+    "target": [
+      {
+        "target": "nsis",
+        "arch": ["x64"]
+      }
+    ],
+    "icon": "public/netx-icon.ico"
+  },
+  "nsis": {
+    "oneClick": false,
+    "allowToChangeInstallationDirectory": true,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true,
+    "shortcutName": "NetX",
+    "installerIcon": "public/netx-icon.ico",
+    "uninstallerIcon": "public/netx-icon.ico",
+    "uninstallDisplayName": "NetX Network Telemetry Suite",
+    "runAfterFinish": true
+  }
+}

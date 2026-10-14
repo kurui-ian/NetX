@@ -4,6 +4,7 @@ node_modules/
 # Build & Release Outputs
 dist/
 release/
+release-installer/
 src-tauri/target/
 
 # Local Shortcuts & Logs
