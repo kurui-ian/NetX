@@ -2,14 +2,19 @@ import React from 'react';
 import {
   Activity,
   AppWindow,
+  ArrowRight,
   BarChart3,
   Cable,
+  CheckCircle2,
+  Clock,
   Gauge,
   LayoutDashboard,
   Network,
   PanelLeftClose,
   PanelLeftOpen,
+  Radio,
   Settings,
+  Sparkles,
   Stethoscope,
   Wifi,
   Wrench,
@@ -36,12 +41,14 @@ export const Sidebar: React.FC = () => {
     networkInfo,
     apps,
     connections,
+    speedTestHistory,
+    lanDevices,
   } = useNetX();
 
   const activeAppsCount = apps.filter((a) => a.status === 'active').length;
 
   const primaryNav: NavItemDef[] = [
-    { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard size={18} className="nav-icon" /> },
+    { id: 'dashboard', label: 'Home', icon: <LayoutDashboard size={18} className="nav-icon" /> },
     { id: 'speed-test', label: 'Speed Test', icon: <Gauge size={18} className="nav-icon" /> },
     { id: 'data-usage', label: 'Data Usage', icon: <BarChart3 size={18} className="nav-icon" /> },
     {
@@ -56,10 +63,49 @@ export const Sidebar: React.FC = () => {
       icon: <Cable size={18} className="nav-icon" />,
       badge: String(connections.length),
     },
-    { id: 'wifi', label: 'Wi-Fi', icon: <Wifi size={18} className="nav-icon" /> },
-    { id: 'network', label: 'Network', icon: <Network size={18} className="nav-icon" /> },
+    { id: 'wifi', label: 'Wi-Fi Spectrum', icon: <Wifi size={18} className="nav-icon" /> },
+    {
+      id: 'network',
+      label: 'Network & LAN',
+      icon: <Network size={18} className="nav-icon" />,
+      badge: lanDevices.length > 0 ? String(lanDevices.length) : undefined,
+    },
     { id: 'tools', label: 'Tools', icon: <Wrench size={18} className="nav-icon" /> },
     { id: 'diagnostics', label: 'Diagnostics', icon: <Stethoscope size={18} className="nav-icon" /> },
+  ];
+
+  // Dynamic Recent Activity items (mirrors "Recent Chats" in inspiration)
+  const recentActivities = [
+    {
+      id: 'rec-1',
+      title: speedTestHistory.length > 0
+        ? `Speed: ${speedTestHistory[0].downloadMbps.toFixed(0)} Mbps down`
+        : 'Speed Benchmark',
+      time: 'Today',
+      nav: 'speed-test' as NavSection,
+    },
+    {
+      id: 'rec-2',
+      title: lanDevices.length > 0
+        ? `Subnet: ${lanDevices.length} LAN devices`
+        : 'ARP Subnet Scan',
+      time: 'Today',
+      nav: 'network' as NavSection,
+    },
+    {
+      id: 'rec-3',
+      title: networkInfo.ssid !== 'Detecting...'
+        ? `Wi-Fi: ${networkInfo.ssid}`
+        : 'Wireless Link State',
+      time: 'Active',
+      nav: 'wifi' as NavSection,
+    },
+    {
+      id: 'rec-4',
+      title: 'Health Diagnostics',
+      time: 'Today',
+      nav: 'diagnostics' as NavSection,
+    },
   ];
 
   return (
@@ -68,12 +114,12 @@ export const Sidebar: React.FC = () => {
       <div className="sidebar-brand">
         <div className="sidebar-brand-left">
           <div className="brand-emblem" aria-hidden="true">
-            <Activity size={21} strokeWidth={2.5} />
+            <Radio size={20} strokeWidth={2.4} />
           </div>
           {!sidebarCollapsed && (
             <div className="brand-text-wrap">
-              <span className="brand-title">NETX</span>
-              <span className="brand-subtitle">Network Utility</span>
+              <span className="brand-title">NetX</span>
+              <span className="brand-subtitle">Telemetry &amp; Utility</span>
             </div>
           )}
         </div>
@@ -104,7 +150,7 @@ export const Sidebar: React.FC = () => {
               {item.icon}
               {!sidebarCollapsed && (
                 <>
-                  <span>{item.label}</span>
+                  <span className="nav-item-label">{item.label}</span>
                   {item.badge && <span className="nav-item-badge">{item.badge}</span>}
                 </>
               )}
@@ -113,21 +159,55 @@ export const Sidebar: React.FC = () => {
         })}
       </nav>
 
-      <div className="sidebar-divider" role="separator" />
-
       {/* Settings Navigation Item */}
-      <button
-        type="button"
-        className={`nav-item ${activeNav === 'settings' ? 'active' : ''}`}
-        onClick={() => setActiveNav('settings')}
-        title={sidebarCollapsed ? 'Settings' : undefined}
-        aria-current={activeNav === 'settings' ? 'page' : undefined}
-      >
-        <Settings size={18} className="nav-icon" />
-        {!sidebarCollapsed && <span>Settings</span>}
-      </button>
+      <div className="sidebar-settings-wrap">
+        <button
+          type="button"
+          className={`nav-item ${activeNav === 'settings' ? 'active' : ''}`}
+          onClick={() => setActiveNav('settings')}
+          title={sidebarCollapsed ? 'Settings' : undefined}
+          aria-current={activeNav === 'settings' ? 'page' : undefined}
+        >
+          <Settings size={18} className="nav-icon" />
+          {!sidebarCollapsed && <span className="nav-item-label">Settings</span>}
+        </button>
+      </div>
 
-      {/* Live Mini Telemetry Pod (Desktop Utility Enhancement) */}
+      {/* Recent Activity Section (Inspired directly by "Recent Chats" in inspiration mockup) */}
+      {!sidebarCollapsed && (
+        <div className="sidebar-recent-section">
+          <div className="sidebar-recent-header">
+            <span className="sidebar-recent-title">Recent Activity</span>
+            <Sparkles size={13} className="sidebar-recent-sparkle" />
+          </div>
+
+          <div className="sidebar-recent-list">
+            {recentActivities.map((rec) => (
+              <div
+                key={rec.id}
+                className="sidebar-recent-item"
+                onClick={() => setActiveNav(rec.nav)}
+                role="button"
+                tabIndex={0}
+              >
+                <span className="recent-item-title">{rec.title}</span>
+                <span className="recent-item-time">{rec.time}</span>
+              </div>
+            ))}
+          </div>
+
+          <button
+            type="button"
+            className="sidebar-view-all-btn"
+            onClick={() => setActiveNav('data-usage')}
+          >
+            <span>View all activity</span>
+            <ArrowRight size={13} />
+          </button>
+        </div>
+      )}
+
+      {/* Live Mini Telemetry Pod */}
       {!sidebarCollapsed && (
         <div className="sidebar-telemetry-pod" aria-label="Live throughput summary">
           <div className="pod-header">

@@ -1,12 +1,20 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
+  Activity,
   AppWindow,
+  Bell,
+  Gauge,
   Globe,
   Laptop,
+  LayoutGrid,
   Moon,
+  PanelRightClose,
+  PanelRightOpen,
   Pause,
   Play,
+  Plus,
   Power,
+  Search,
   Settings,
   Sun,
   Wifi,
@@ -18,7 +26,7 @@ import { StatusBadge } from '../ui/Primitives';
 const PAGE_META: Record<NavSection, { title: string; subtitle: string }> = {
   dashboard: {
     title: 'Network Overview',
-    subtitle: 'Real-time connection status, throughput performance, and data consumption.',
+    subtitle: 'Real-time connection status, throughput performance, and telemetry.',
   },
   'speed-test': {
     title: 'Speed Test',
@@ -58,7 +66,17 @@ const PAGE_META: Record<NavSection, { title: string; subtitle: string }> = {
   },
 };
 
-export const TopHeader: React.FC = () => {
+interface TopHeaderProps {
+  onOpenCommandPalette: () => void;
+  isHudOpen: boolean;
+  onToggleHud: () => void;
+}
+
+export const TopHeader: React.FC<TopHeaderProps> = ({
+  onOpenCommandPalette,
+  isHudOpen,
+  onToggleHud,
+}) => {
   const {
     activeNav,
     setActiveNav,
@@ -68,6 +86,7 @@ export const TopHeader: React.FC = () => {
     networkInfo,
     currentDownloadMbps,
     currentUploadMbps,
+    currentPingMs,
     monitoringPaused,
     setMonitoringPaused,
     pushToast,
@@ -89,11 +108,11 @@ export const TopHeader: React.FC = () => {
   const meta = PAGE_META[activeNav];
 
   const cycleTheme = () => {
-    const order: AppearanceMode[] = ['system', 'light', 'dark'];
+    const order: AppearanceMode[] = ['dark', 'light', 'system'];
     const next = order[(order.indexOf(settings.appearance) + 1) % order.length];
     updateSettings({ appearance: next });
     pushToast(
-      `Appearance set to ${next.charAt(0).toUpperCase() + next.slice(1)} mode.`,
+      `Appearance set to ${next === 'dark' ? 'Cosmic Dark' : next.charAt(0).toUpperCase() + next.slice(1)} mode.`,
       'info'
     );
   };
@@ -106,107 +125,115 @@ export const TopHeader: React.FC = () => {
 
   return (
     <header className="top-header">
+      {/* Left: View Title & Subtitle */}
       <div className="header-title-group">
         <h1 className="header-title">{meta.title}</h1>
         <p className="header-subtitle">{meta.subtitle}</p>
       </div>
 
-      <div className="header-controls">
-        {/* Real Connection Status Pill */}
-        <div className="header-connection-pill" aria-label="Current network connection">
-          <Globe size={16} style={{ color: 'var(--brand-mint)' }} />
-          <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.2 }}>
-            <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>
-              {networkInfo.ssid}
-            </span>
-            <span className="mono" style={{ fontSize: 12, fontWeight: 600 }}>
-              {networkInfo.ipv4}
-            </span>
-          </div>
-          <StatusBadge
-            variant={connected ? 'success' : 'danger'}
-            label={connected ? 'Connected' : 'Offline'}
-          />
-        </div>
+      {/* Center: Search & Command Bar (Matches Search ChatGPT ⌘K in inspiration) */}
+      <div className="header-search-wrap" onClick={onOpenCommandPalette} role="search">
+        <Search size={15} className="header-search-icon" />
+        <span className="header-search-placeholder">Search NetX or jump to tool...</span>
+        <kbd className="header-search-kbd">Ctrl K</kbd>
+      </div>
 
-        {/* Quick Appearance Mode Button (Section 4) */}
+      {/* Right: Controls & Actions */}
+      <div className="header-controls">
+        {/* Quick Action Pill Button: + Speed Test (Matches + New Chat in inspiration) */}
         <button
           type="button"
-          className="btn btn-secondary btn-sm"
+          className="header-action-btn"
+          onClick={() => setActiveNav('speed-test')}
+          title="Run a quick Cloudflare Speed Test"
+        >
+          <Plus size={14} strokeWidth={2.6} />
+          <span>Speed Test</span>
+        </button>
+
+        {/* Real Connection Status Pill */}
+        <div
+          className="header-connection-pill"
+          aria-label="Current network connection"
+          onClick={() => setActiveNav('wifi')}
+          role="button"
+          tabIndex={0}
+          title="Click to view Wi-Fi spectrum and link details"
+        >
+          <div className={`header-live-dot ${connected ? 'online' : 'offline'}`} />
+          <div className="header-connection-info">
+            <span className="header-connection-ssid">{networkInfo.ssid}</span>
+            <span className="header-connection-ip mono">{networkInfo.ipv4}</span>
+          </div>
+        </div>
+
+        {/* HUD Toggle Button */}
+        <button
+          type="button"
+          className={`header-icon-btn ${isHudOpen ? 'active' : ''}`}
+          onClick={onToggleHud}
+          title={isHudOpen ? 'Collapse Telemetry HUD' : 'Expand Telemetry HUD'}
+          aria-label={isHudOpen ? 'Collapse Telemetry HUD' : 'Expand Telemetry HUD'}
+        >
+          {isHudOpen ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}
+        </button>
+
+        {/* Quick Appearance Mode Button */}
+        <button
+          type="button"
+          className="header-icon-btn"
           onClick={cycleTheme}
-          title="Switch Appearance (Light / Dark / System)"
+          title={`Appearance: ${settings.appearance} (Click to switch)`}
           aria-label={`Appearance mode: ${settings.appearance}`}
         >
           {getThemeIcon()}
-          <span style={{ textTransform: 'capitalize' }}>{settings.appearance}</span>
         </button>
 
-        {/* System Tray Menu Control (Section 21) */}
+        {/* System Tray Menu Control */}
         <div ref={trayRef} style={{ position: 'relative' }}>
           <button
             type="button"
-            className="btn btn-secondary btn-sm"
+            className="header-icon-btn"
             onClick={() => setTrayOpen((o) => !o)}
             aria-expanded={trayOpen}
             aria-haspopup="menu"
             title="System Tray Quick Menu"
           >
-            <Wifi size={14} style={{ color: 'var(--brand-mint)' }} />
-            <span>Tray</span>
+            <Wifi size={16} />
           </button>
 
           {trayOpen && (
             <div className="tray-popover" role="menu" aria-label="System Tray Menu">
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  padding: '4px 8px',
-                }}
-              >
-                <span style={{ fontWeight: 800, fontSize: 12.5, letterSpacing: '0.05em' }}>
-                  NETX
-                </span>
+              <div className="tray-popover-header">
+                <span className="tray-popover-title">NetX Pro Engine</span>
                 <StatusBadge
                   variant={monitoringPaused ? 'warning' : 'success'}
                   label={monitoringPaused ? 'Paused' : 'Active'}
                 />
               </div>
 
-              <div
-                style={{
-                  background: 'var(--bg-surface-subtle)',
-                  border: '1px solid var(--border-subtle)',
-                  borderRadius: 'var(--radius-xs)',
-                  padding: '8px 10px',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: 4,
-                  fontSize: 12.5,
-                }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: 'var(--text-secondary)' }}>Download:</span>
-                  <span className="mono" style={{ fontWeight: 700, color: 'var(--series-download)' }}>
+              <div className="tray-popover-stats">
+                <div className="tray-stat-row">
+                  <span className="tray-stat-label">Download:</span>
+                  <span className="mono tray-stat-val val-download">
                     {currentDownloadMbps.toFixed(2)} Mbps
                   </span>
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: 'var(--text-secondary)' }}>Upload:</span>
-                  <span className="mono" style={{ fontWeight: 700, color: 'var(--series-upload)' }}>
+                <div className="tray-stat-row">
+                  <span className="tray-stat-label">Upload:</span>
+                  <span className="mono tray-stat-val val-upload">
                     {currentUploadMbps.toFixed(2)} Mbps
+                  </span>
+                </div>
+                <div className="tray-stat-row">
+                  <span className="tray-stat-label">Latency:</span>
+                  <span className="mono tray-stat-val">
+                    {currentPingMs || '—'} ms
                   </span>
                 </div>
               </div>
 
-              <div
-                style={{
-                  height: 1,
-                  background: 'var(--border-subtle)',
-                  margin: '2px 0',
-                }}
-              />
+              <div className="tray-divider" />
 
               <button
                 type="button"
@@ -217,8 +244,8 @@ export const TopHeader: React.FC = () => {
                   setTrayOpen(false);
                 }}
               >
-                <span>Open NetX</span>
-                <AppWindow size={14} style={{ color: 'var(--text-muted)' }} />
+                <span>Overview Dashboard</span>
+                <AppWindow size={14} />
               </button>
 
               <button
@@ -237,11 +264,7 @@ export const TopHeader: React.FC = () => {
                 }}
               >
                 <span>{monitoringPaused ? 'Resume Monitoring' : 'Pause Monitoring'}</span>
-                {monitoringPaused ? (
-                  <Play size={14} style={{ color: 'var(--brand-mint)' }} />
-                ) : (
-                  <Pause size={14} style={{ color: 'var(--text-muted)' }} />
-                )}
+                {monitoringPaused ? <Play size={14} /> : <Pause size={14} />}
               </button>
 
               <button
@@ -254,21 +277,20 @@ export const TopHeader: React.FC = () => {
                 }}
               >
                 <span>Settings</span>
-                <Settings size={14} style={{ color: 'var(--text-muted)' }} />
+                <Settings size={14} />
               </button>
 
               <button
                 type="button"
                 role="menuitem"
-                className="tray-menu-item"
-                style={{ color: 'var(--status-danger)' }}
+                className="tray-menu-item tray-exit"
                 onClick={() => {
                   if (window.netxNative) {
                     window.netxNative.quitApp();
                   }
                 }}
               >
-                <span>Exit</span>
+                <span>Exit NetX</span>
                 <Power size={14} />
               </button>
             </div>

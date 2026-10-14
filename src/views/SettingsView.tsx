@@ -54,20 +54,20 @@ export const SettingsView: React.FC = () => {
   }[] = [
     {
       mode: 'light',
-      title: 'Light',
-      desc: 'Crisp alabaster canvas optimized for bright environments.',
+      title: 'Crystalline Light',
+      desc: 'Bright frosted glass canvas with crisp violet and slate accents.',
       icon: <Sun size={18} />,
     },
     {
       mode: 'dark',
-      title: 'Dark',
-      desc: 'Low-glare carbon interface designed for night or low-light workspaces.',
+      title: 'Cosmic Violet Dark',
+      desc: 'Translucent frosted obsidian glass with electric violet glow and ambient depth.',
       icon: <Moon size={18} />,
     },
     {
       mode: 'system',
-      title: 'System',
-      desc: 'Automatically follow your Windows Light or Dark appearance preference.',
+      title: 'System Dynamic',
+      desc: 'Automatically follow your Windows light or dark appearance preference.',
       icon: <Laptop size={18} />,
     },
   ];

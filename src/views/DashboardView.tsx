@@ -1,9 +1,12 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Activity,
+  AppWindow,
   ArrowDownRight,
+  ArrowRight,
   ArrowUpRight,
   BarChart3,
+  Cable,
   CheckCircle2,
   ChevronRight,
   Copy,
@@ -12,11 +15,16 @@ import {
   Globe,
   Pause,
   Play,
+  Radio,
   Router,
+  Search,
   Server,
   ShieldCheck,
+  Sparkles,
   Stethoscope,
+  Terminal,
   Wifi,
+  Zap,
 } from 'lucide-react';
 import { useNetX } from '../context/NetXContext';
 import { BandwidthGraph, Button, MetricTile, StatusBadge } from '../components/ui/Primitives';
@@ -42,8 +50,11 @@ export const DashboardView: React.FC = () => {
     monitoringPaused,
     setMonitoringPaused,
     apps,
+    connections,
     pushToast,
   } = useNetX();
+
+  const [commandInput, setCommandInput] = useState('');
 
   const copyValue = (label: string, val: string) => {
     navigator.clipboard?.writeText(val);
@@ -54,9 +65,200 @@ export const DashboardView: React.FC = () => {
   const peakUpload = Math.max(...bandwidthHistory.map((p) => p.uploadMbps), currentUploadMbps);
   const usagePercent = Math.min(100, Math.round((monthUsageGb / settings.monthlyCapGb) * 100));
 
+  const handleCommandSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const cmd = commandInput.trim().toLowerCase();
+    if (!cmd) return;
+
+    if (cmd.includes('speed') || cmd.includes('bench')) {
+      setActiveNav('speed-test');
+      pushToast('Navigating to Speed Test...', 'info');
+    } else if (cmd.includes('wifi') || cmd.includes('signal') || cmd.includes('ssid')) {
+      setActiveNav('wifi');
+      pushToast('Navigating to Wi-Fi Spectrum...', 'info');
+    } else if (cmd.includes('lan') || cmd.includes('arp') || cmd.includes('device') || cmd.includes('subnet')) {
+      setActiveNav('network');
+      pushToast('Navigating to Local Network & Subnet...', 'info');
+    } else if (cmd.includes('diag') || cmd.includes('health') || cmd.includes('check')) {
+      setActiveNav('diagnostics');
+      pushToast('Navigating to Guided Diagnostics...', 'info');
+    } else if (cmd.includes('ping') || cmd.includes('trace') || cmd.includes('dns') || cmd.includes('port') || /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(cmd)) {
+      setActiveNav('tools');
+      pushToast(`Opening Network Tools for "${cmd}"...`, 'info');
+    } else if (cmd.includes('app') || cmd.includes('process')) {
+      setActiveNav('applications');
+      pushToast('Navigating to Applications...', 'info');
+    } else if (cmd.includes('conn') || cmd.includes('socket')) {
+      setActiveNav('connections');
+      pushToast('Navigating to Active Connections...', 'info');
+    } else if (cmd.includes('usage') || cmd.includes('data') || cmd.includes('byte')) {
+      setActiveNav('data-usage');
+      pushToast('Navigating to Data Usage...', 'info');
+    } else if (cmd.includes('setting') || cmd.includes('theme') || cmd.includes('dark')) {
+      setActiveNav('settings');
+      pushToast('Navigating to Settings...', 'info');
+    } else {
+      setActiveNav('tools');
+      pushToast(`Opening Network Tools for "${cmd}"...`, 'info');
+    }
+    setCommandInput('');
+  };
+
   return (
     <div className="page-container">
-      {/* 1. Primary Performance Metrics at a Glance (Section 7 & 8) */}
+      {/* =========================================================================
+          HERO SECTION (Direct Inspiration from the Mockup)
+          Atmospheric title, frosted glass command prompt bar, suggestion pills,
+          and 4 glass quick-launch cards
+          ========================================================================= */}
+      <section className="hero-section" aria-label="Command & Network Overview">
+        <div className="hero-header-wrap">
+          <h1 className="hero-title">What can I monitor for you today?</h1>
+          <p className="hero-subtitle">
+            Connected to <span className="hero-highlight">{networkInfo.ssid}</span> · Local IP <span className="mono hero-highlight">{networkInfo.ipv4}</span> · 64-bit hardware telemetry
+          </p>
+        </div>
+
+        {/* Frosted Glass Prompt / Command Input */}
+        <form className="hero-command-bar" onSubmit={handleCommandSubmit}>
+          <div className="hero-command-left-icon">
+            <Terminal size={17} />
+          </div>
+          <input
+            type="text"
+            className="hero-command-input"
+            placeholder="Type a command, IP address, or utility (e.g. speed test, 1.1.1.1, scan wifi, arp sweep)..."
+            value={commandInput}
+            onChange={(e) => setCommandInput(e.target.value)}
+          />
+          <button type="submit" className="hero-command-btn" title="Run command">
+            <ArrowRight size={16} />
+          </button>
+        </form>
+
+        {/* Suggestion Pills */}
+        <div className="hero-pills-row">
+          <button
+            type="button"
+            className="hero-pill"
+            onClick={() => setActiveNav('speed-test')}
+          >
+            <Gauge size={13} className="hero-pill-icon" />
+            <span>Speed Benchmark</span>
+          </button>
+          <button
+            type="button"
+            className="hero-pill"
+            onClick={() => setActiveNav('wifi')}
+          >
+            <Wifi size={13} className="hero-pill-icon" />
+            <span>Wi-Fi Spectrum</span>
+          </button>
+          <button
+            type="button"
+            className="hero-pill"
+            onClick={() => setActiveNav('network')}
+          >
+            <Radio size={13} className="hero-pill-icon" />
+            <span>Subnet ARP Sweep</span>
+          </button>
+          <button
+            type="button"
+            className="hero-pill"
+            onClick={() => setActiveNav('diagnostics')}
+          >
+            <Stethoscope size={13} className="hero-pill-icon" />
+            <span>Guided Diagnostics</span>
+          </button>
+          <button
+            type="button"
+            className="hero-pill"
+            onClick={() => setActiveNav('data-usage')}
+          >
+            <BarChart3 size={13} className="hero-pill-icon" />
+            <span>Data Usage</span>
+          </button>
+        </div>
+
+        {/* 4 Frosted Launch Cards (Exact mirror of the 4 starter cards in the inspo image) */}
+        <div className="hero-cards-grid">
+          <div
+            className="hero-launch-card"
+            onClick={() => setActiveNav('dashboard')}
+            role="button"
+            tabIndex={0}
+          >
+            <div className="launch-card-content">
+              <span className="launch-card-title">Live Bandwidth</span>
+              <span className="launch-card-sub">64-bit hardware counters</span>
+              <div className="launch-card-metric mono">
+                ↓ {currentDownloadMbps.toFixed(1)} / ↑ {currentUploadMbps.toFixed(1)} Mbps
+              </div>
+            </div>
+            <div className="launch-card-icon-wrap icon-purple">
+              <Activity size={18} />
+            </div>
+          </div>
+
+          <div
+            className="hero-launch-card"
+            onClick={() => setActiveNav('speed-test')}
+            role="button"
+            tabIndex={0}
+          >
+            <div className="launch-card-content">
+              <span className="launch-card-title">Speed Benchmark</span>
+              <span className="launch-card-sub">Cloudflare HTTPS engine</span>
+              <div className="launch-card-metric mono">
+                {currentPingMs || '—'} ms ping · {currentJitterMs.toFixed(1)} ms jitter
+              </div>
+            </div>
+            <div className="launch-card-icon-wrap icon-cyan">
+              <Gauge size={18} />
+            </div>
+          </div>
+
+          <div
+            className="hero-launch-card"
+            onClick={() => setActiveNav('connections')}
+            role="button"
+            tabIndex={0}
+          >
+            <div className="launch-card-content">
+              <span className="launch-card-title">Active Sockets</span>
+              <span className="launch-card-sub">TCP / UDP process mapping</span>
+              <div className="launch-card-metric mono">
+                {connections.length} active sockets · {apps.length} apps
+              </div>
+            </div>
+            <div className="launch-card-icon-wrap icon-indigo">
+              <Cable size={18} />
+            </div>
+          </div>
+
+          <div
+            className="hero-launch-card"
+            onClick={() => setActiveNav('diagnostics')}
+            role="button"
+            tabIndex={0}
+          >
+            <div className="launch-card-content">
+              <span className="launch-card-title">Guided Diagnostics</span>
+              <span className="launch-card-sub">Automated health audit</span>
+              <div className="launch-card-metric">
+                {connected && internetReachable ? 'All 4 hops healthy' : 'Inspect connection'}
+              </div>
+            </div>
+            <div className="launch-card-icon-wrap icon-mint">
+              <ShieldCheck size={18} />
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* =========================================================================
+          PRIMARY PERFORMANCE METRICS AT A GLANCE
+          ========================================================================= */}
       <section aria-label="Current network performance metrics" className="metrics-strip">
         <MetricTile
           label="Download Speed"
@@ -125,7 +327,9 @@ export const DashboardView: React.FC = () => {
         />
       </section>
 
-      {/* 2. Connection Path & Quick Actions (Real 4-Hop Topology) */}
+      {/* =========================================================================
+          CONNECTION PATH & HEALTH (4-HOP REAL TOPOLOGY)
+          ========================================================================= */}
       <section className="surface-panel" aria-label="Connection topology and quick actions">
         <div className="surface-panel-header">
           <div>
@@ -146,7 +350,7 @@ export const DashboardView: React.FC = () => {
           <div className="topology-node">
             <span className="topology-step-badge">1</span>
             <div className="topology-icon-ring">
-              <Wifi size={23} />
+              <Wifi size={22} />
             </div>
             <div className="topology-node-title">{networkInfo.interfaceName} Adapter</div>
             <div className="topology-node-detail">
@@ -166,7 +370,7 @@ export const DashboardView: React.FC = () => {
           <div className="topology-node">
             <span className="topology-step-badge">2</span>
             <div className="topology-icon-ring">
-              <Router size={23} />
+              <Router size={22} />
             </div>
             <div className="topology-node-title">Local Gateway</div>
             <div className="topology-node-detail mono">{networkInfo.gateway}</div>
@@ -184,7 +388,7 @@ export const DashboardView: React.FC = () => {
           <div className="topology-node">
             <span className="topology-step-badge">3</span>
             <div className="topology-icon-ring">
-              <Server size={23} />
+              <Server size={22} />
             </div>
             <div className="topology-node-title">DNS Resolver</div>
             <div className="topology-node-detail mono">{networkInfo.dnsServers}</div>
@@ -202,7 +406,7 @@ export const DashboardView: React.FC = () => {
           <div className="topology-node">
             <span className="topology-step-badge amber">4</span>
             <div className="topology-icon-ring amber">
-              <Globe size={23} />
+              <Globe size={22} />
             </div>
             <div className="topology-node-title">Internet</div>
             <div className="topology-node-detail mono">{networkInfo.publicIp}</div>
@@ -213,10 +417,10 @@ export const DashboardView: React.FC = () => {
           </div>
         </div>
 
-        {/* Integrated Status Callout & Quick Actions Bar (Section 7) */}
+        {/* Integrated Status Callout & Quick Actions Bar */}
         <div className={`status-callout-strip ${!internetReachable ? 'warning' : ''}`}>
           <div className="status-callout-left">
-            <CheckCircle2 size={20} style={{ color: 'var(--status-success)', flexShrink: 0 }} />
+            <CheckCircle2 size={18} style={{ color: 'var(--status-success)', flexShrink: 0 }} />
             <span>
               {internetReachable
                 ? `Connected to ${networkInfo.ssid} (${networkInfo.ipv4}) via ${networkInfo.adapterDescription}. Ping latency is ${currentPingMs} ms.`
@@ -226,21 +430,21 @@ export const DashboardView: React.FC = () => {
           <div className="status-callout-actions">
             <Button
               variant="primary"
-              icon={<Gauge size={15} />}
+              icon={<Gauge size={14} />}
               onClick={() => setActiveNav('speed-test')}
             >
               Start Speed Test
             </Button>
             <Button
               variant="secondary"
-              icon={<Stethoscope size={15} />}
+              icon={<Stethoscope size={14} />}
               onClick={() => setActiveNav('diagnostics')}
             >
               Run Diagnostics
             </Button>
             <Button
               variant="secondary"
-              icon={<BarChart3 size={15} />}
+              icon={<BarChart3 size={14} />}
               onClick={() => setActiveNav('data-usage')}
             >
               View Data Usage
@@ -249,7 +453,9 @@ export const DashboardView: React.FC = () => {
         </div>
       </section>
 
-      {/* 3. Real-Time Network Activity Graph & Monthly Data Summary (Section 7) */}
+      {/* =========================================================================
+          REAL-TIME NETWORK ACTIVITY GRAPH & MONTHLY DATA SUMMARY
+          ========================================================================= */}
       <div className="split-grid-asymmetric">
         <section className="surface-panel" aria-label="Real-time network activity">
           <div className="surface-panel-header">
@@ -300,7 +506,7 @@ export const DashboardView: React.FC = () => {
           <BandwidthGraph data={bandwidthHistory} height={215} />
         </section>
 
-        {/* Data Usage Overview Card (Section 7) */}
+        {/* Data Usage Overview Card */}
         <section
           className="surface-panel"
           aria-label="Data usage summary"
@@ -391,7 +597,9 @@ export const DashboardView: React.FC = () => {
         </section>
       </div>
 
-      {/* 4. Two-Column Bottom Details: Real Network Status + Real Active Applications */}
+      {/* =========================================================================
+          TWO-COLUMN BOTTOM DETAILS: REAL NETWORK STATUS + REAL ACTIVE APPLICATIONS
+          ========================================================================= */}
       <div className="split-grid-2">
         {/* Left: Real Network Status Key-Value List */}
         <section className="surface-panel" aria-label="Connection and network status">
@@ -526,7 +734,9 @@ export const DashboardView: React.FC = () => {
         </section>
       </div>
 
-      {/* 5. Bottom Security & Diagnostics Callout Strip */}
+      {/* =========================================================================
+          BOTTOM SECURITY & DIAGNOSTICS CALLOUT STRIP
+          ========================================================================= */}
       <section
         className="surface-panel"
         style={{
@@ -547,12 +757,13 @@ export const DashboardView: React.FC = () => {
               width: 44,
               height: 44,
               borderRadius: 12,
-              background: 'var(--brand-mint)',
+              background: 'linear-gradient(135deg, #8b5cf6, #7c3aed)',
               color: '#ffffff',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               flexShrink: 0,
+              boxShadow: '0 4px 14px rgba(139, 92, 246, 0.4)',
             }}
           >
             <ShieldCheck size={24} />
@@ -570,7 +781,7 @@ export const DashboardView: React.FC = () => {
         </div>
 
         <Button
-          variant="accent"
+          variant="primary"
           icon={<Stethoscope size={15} />}
           onClick={() => setActiveNav('diagnostics')}
         >

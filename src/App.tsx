@@ -1,8 +1,10 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { CheckCircle2, Info, AlertTriangle } from 'lucide-react';
 import { NetXProvider, useNetX } from './context/NetXContext';
 import { Sidebar } from './components/layout/Sidebar';
 import { TopHeader } from './components/layout/TopHeader';
+import { TelemetryHUD } from './components/layout/TelemetryHUD';
+import { CommandPalette } from './components/ui/CommandPalette';
 import { DashboardView } from './views/DashboardView';
 import { SpeedTestView } from './views/SpeedTestView';
 import { DataUsageView } from './views/DataUsageView';
@@ -16,6 +18,41 @@ import { SettingsView } from './views/SettingsView';
 
 const NetXShell: React.FC = () => {
   const { activeNav, sidebarCollapsed, toasts } = useNetX();
+
+  const [isHudOpen, setIsHudOpen] = useState<boolean>(() => {
+    try {
+      const stored = localStorage.getItem('netx-hud-open');
+      return stored !== null ? stored === 'true' : true;
+    } catch {
+      return true;
+    }
+  });
+
+  const [isCommandOpen, setIsCommandOpen] = useState<boolean>(false);
+
+  const toggleHud = () => {
+    setIsHudOpen((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem('netx-hud-open', String(next));
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  };
+
+  // Global hotkeys: Ctrl+K or Cmd+K to open Command Palette
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setIsCommandOpen((open) => !open);
+      }
+    };
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, []);
 
   const renderActiveView = () => {
     switch (activeNav) {
@@ -45,17 +82,33 @@ const NetXShell: React.FC = () => {
   };
 
   return (
-    <div className={`app-shell ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
+    <div
+      className={`app-shell ${sidebarCollapsed ? 'sidebar-collapsed' : ''} ${
+        !isHudOpen ? 'hud-collapsed' : ''
+      }`}
+    >
+      {/* 1. Left Navigation Sidebar */}
       <Sidebar />
 
+      {/* 2. Center Main Workspace */}
       <div className="workspace">
-        <TopHeader />
+        <TopHeader
+          onOpenCommandPalette={() => setIsCommandOpen(true)}
+          isHudOpen={isHudOpen}
+          onToggleHud={toggleHud}
+        />
         <main className="main-scroll" id="main-content">
           {renderActiveView()}
         </main>
       </div>
 
-      {/* Subtle Toast Notifications */}
+      {/* 3. Right Telemetry & Engine HUD Sidebar (Matching Inspiration Mockup) */}
+      <TelemetryHUD isOpen={isHudOpen} onClose={() => setIsHudOpen(false)} />
+
+      {/* 4. Global Command Palette Modal (Ctrl + K) */}
+      <CommandPalette isOpen={isCommandOpen} onClose={() => setIsCommandOpen(false)} />
+
+      {/* 5. Subtle Toast Notifications */}
       {toasts.length > 0 && (
         <div className="toast-stack" role="status" aria-live="polite">
           {toasts.map((t) => (
@@ -65,7 +118,7 @@ const NetXShell: React.FC = () => {
               ) : t.type === 'warning' ? (
                 <AlertTriangle size={16} style={{ color: 'var(--status-warning)' }} />
               ) : (
-                <Info size={16} style={{ color: 'var(--brand-mint)' }} />
+                <Info size={16} style={{ color: 'var(--brand-primary)' }} />
               )}
               <span>{t.text}</span>
             </div>
