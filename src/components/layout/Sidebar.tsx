@@ -122,28 +122,43 @@ export const Sidebar: React.FC = () => {
   return (
     <aside className="sidebar" aria-label="Main navigation">
       {/* Brand Header */}
-      <div className="sidebar-brand">
-        <div className="sidebar-brand-left">
-          <div className="brand-emblem" aria-hidden="true">
-            <NetXGlobeIcon size={24} />
-          </div>
-          {!sidebarCollapsed && (
+      {!sidebarCollapsed ? (
+        <div className="sidebar-brand">
+          <div className="sidebar-brand-left">
+            <div className="brand-emblem" aria-hidden="true">
+              <NetXGlobeIcon size={22} />
+            </div>
             <div className="brand-text-wrap">
               <span className="brand-title">NetX</span>
               <span className="brand-subtitle">Telemetry &amp; Utility</span>
             </div>
-          )}
+          </div>
+          <button
+            type="button"
+            className="sidebar-collapse-btn"
+            onClick={() => setSidebarCollapsed(true)}
+            title="Collapse sidebar"
+            aria-label="Collapse sidebar"
+          >
+            <PanelLeftClose size={15} />
+          </button>
         </div>
-        <button
-          type="button"
-          className="sidebar-collapse-btn"
-          onClick={() => setSidebarCollapsed((c) => !c)}
-          title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-        >
-          {sidebarCollapsed ? <PanelLeftOpen size={15} /> : <PanelLeftClose size={15} />}
-        </button>
-      </div>
+      ) : (
+        <div className="sidebar-brand-collapsed">
+          <div className="brand-emblem" aria-hidden="true" title="NetX Network Suite">
+            <NetXGlobeIcon size={22} />
+          </div>
+          <button
+            type="button"
+            className="sidebar-collapse-btn collapsed-toggle"
+            onClick={() => setSidebarCollapsed(false)}
+            title="Expand sidebar"
+            aria-label="Expand sidebar"
+          >
+            <PanelLeftOpen size={15} />
+          </button>
+        </div>
+      )}
 
       {/* Primary Navigation */}
       <nav className="sidebar-nav">

@@ -1010,6 +1010,21 @@ ipcMain.handle('netx:run-speed-test', async (event, options = {}) => {
     const finalJitter = pings.length > 1 ? Math.round((jSum / (pings.length - 1)) * 10) / 10 : 1.0;
     const finalPacketLoss = Math.round((lostCount / totalProbes) * 100);
 
+    // Smooth Latency Locking Interlude (800ms)
+    sendProgress({
+      stage: 'ping',
+      progress: 24,
+      liveValue: avgPing,
+      pingMs: avgPing,
+      jitterMs: finalJitter,
+      packetLossPct: finalPacketLoss,
+      server: endpointName,
+      status: `Latency locked: ${avgPing} ms (jitter: ${finalJitter} ms). Initializing download streams...`,
+    });
+
+    await new Promise((r) => setTimeout(r, 800));
+    checkCancelled();
+
     // ------------------------------------------------------------------------
     // Stage 3: Multi-stream Download Benchmark (10–12 seconds real data transfer)
     // ------------------------------------------------------------------------
@@ -1143,18 +1158,39 @@ ipcMain.handle('netx:run-speed-test', async (event, options = {}) => {
     checkCancelled();
 
     // ------------------------------------------------------------------------
+    // Stage 3.5: Download Locked Transition Interlude (1.4 seconds)
+    // Smooth visual animation pause allowing the user to see the locked download
+    // result and easing the UI gauge before upload streams begin.
+    // ------------------------------------------------------------------------
+    sendProgress({
+      stage: 'transition',
+      progress: 63,
+      liveValue: downloadMbps,
+      downloadMbps,
+      pingMs: avgPing,
+      jitterMs: finalJitter,
+      packetLossPct: finalPacketLoss,
+      server: endpointName,
+      status: `Download locked at ${downloadMbps.toFixed(1)} Mbps. Initializing upload streams...`,
+      samples: downloadSamples.slice(-25),
+    });
+
+    await new Promise((r) => setTimeout(r, 1400));
+    checkCancelled();
+
+    // ------------------------------------------------------------------------
     // Stage 4: Multi-stream Upload Benchmark (8–10 seconds real data transfer)
     // ------------------------------------------------------------------------
     sendProgress({
       stage: 'upload',
-      progress: 63,
+      progress: 64,
       liveValue: 0,
       downloadMbps,
       pingMs: avgPing,
       jitterMs: finalJitter,
       packetLossPct: finalPacketLoss,
       server: endpointName,
-      status: 'Measuring upload throughput...',
+      status: 'Measuring upload throughput across multiple streams...',
     });
 
     const uploadSamples = [];

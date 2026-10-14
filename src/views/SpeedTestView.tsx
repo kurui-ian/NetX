@@ -24,7 +24,7 @@ import {
 } from '../components/ui/Primitives';
 import { SpeedTestRecord } from '../types/netx';
 
-type TestStage = 'idle' | 'prep' | 'ping' | 'download' | 'upload' | 'finalizing' | 'complete' | 'cancelled' | 'error';
+type TestStage = 'idle' | 'prep' | 'ping' | 'download' | 'transition' | 'upload' | 'finalizing' | 'complete' | 'cancelled' | 'error';
 
 interface ThroughputPoint {
   sec: number;
@@ -63,7 +63,7 @@ export const SpeedTestView: React.FC = () => {
   const [sortBy, setSortBy] = useState<'date' | 'download' | 'upload' | 'ping'>('date');
   const [sortAsc, setSortAsc] = useState<boolean>(false);
 
-  const isRunning = stage === 'prep' || stage === 'ping' || stage === 'download' || stage === 'upload' || stage === 'finalizing';
+  const isRunning = stage === 'prep' || stage === 'ping' || stage === 'download' || stage === 'transition' || stage === 'upload' || stage === 'finalizing';
 
   useEffect(() => {
     if (!window.netxNative) return;
@@ -324,13 +324,14 @@ export const SpeedTestView: React.FC = () => {
             { id: 'prep', label: '1. Prepare' },
             { id: 'ping', label: '2. Latency & Loss' },
             { id: 'download', label: '3. Download' },
-            { id: 'upload', label: '4. Upload' },
+            { id: 'upload', label: stage === 'transition' ? '4. Upload (Initializing...)' : '4. Upload' },
             { id: 'complete', label: '5. Results' },
           ].map((step, idx) => {
             const stepOrder = ['prep', 'ping', 'download', 'upload', 'complete'];
-            const currentIdx = stepOrder.indexOf(stage === 'finalizing' ? 'upload' : stage);
-            const isStepActive = stage === step.id;
-            const isStepDone = stage === 'complete' || currentIdx > idx;
+            const currentStageKey = stage === 'finalizing' ? 'upload' : stage === 'transition' ? 'upload' : stage;
+            const currentIdx = stepOrder.indexOf(currentStageKey);
+            const isStepActive = stage === step.id || (stage === 'transition' && step.id === 'upload');
+            const isStepDone = stage === 'complete' || currentIdx > idx || (stage === 'transition' && step.id === 'download');
 
             return (
               <div
@@ -339,27 +340,27 @@ export const SpeedTestView: React.FC = () => {
                   display: 'inline-flex',
                   alignItems: 'center',
                   gap: 6,
-                  padding: '4px 12px',
+                  padding: '5px 14px',
                   borderRadius: 'var(--radius-pill)',
                   fontSize: 12,
                   fontWeight: isStepActive ? 700 : 500,
                   background: isStepActive
-                    ? 'rgba(168, 85, 247, 0.22)'
+                    ? 'rgba(168, 85, 247, 0.18)'
                     : isStepDone
-                    ? 'rgba(45, 212, 191, 0.12)'
+                    ? 'rgba(52, 211, 153, 0.12)'
                     : 'transparent',
                   color: isStepActive
-                    ? '#e9d5ff'
+                    ? 'var(--brand-lilac)'
                     : isStepDone
-                    ? 'var(--brand-mint)'
+                    ? 'var(--status-success)'
                     : 'var(--text-muted)',
                   border: isStepActive
-                    ? '1px solid rgba(192, 132, 252, 0.4)'
+                    ? '1px solid var(--border-strong)'
                     : '1px solid transparent',
-                  transition: 'all 0.2s ease',
+                  transition: 'all 0.25s ease',
                 }}
               >
-                {isStepDone ? <CheckCircle2 size={13} /> : null}
+                {isStepDone ? <CheckCircle2 size={13} style={{ color: 'var(--status-success)' }} /> : null}
                 <span>{step.label}</span>
               </div>
             );
@@ -409,16 +410,16 @@ export const SpeedTestView: React.FC = () => {
                   </filter>
                 </defs>
 
-                {/* Background Track Arc */}
+                {/* Background Track Arc - Uses CSS token for crisp light & dark themes */}
                 <path
                   d={gaugeConfig.trackPath}
                   fill="none"
-                  stroke="rgba(255, 255, 255, 0.08)"
+                  stroke="var(--border-default)"
                   strokeWidth="14"
                   strokeLinecap="round"
                 />
 
-                {/* Graduation Ticks */}
+                {/* Graduation Ticks - Uses CSS token for crisp contrast in light mode */}
                 {gaugeConfig.ticks.map((t, i) => (
                   <line
                     key={i}
@@ -426,7 +427,7 @@ export const SpeedTestView: React.FC = () => {
                     y1={t.p1.y}
                     x2={t.p2.x}
                     y2={t.p2.y}
-                    stroke="rgba(255, 255, 255, 0.22)"
+                    stroke="var(--border-strong)"
                     strokeWidth="2"
                   />
                 ))}
@@ -440,7 +441,7 @@ export const SpeedTestView: React.FC = () => {
                     strokeWidth="14"
                     strokeLinecap="round"
                     filter="url(#gaugeGlow)"
-                    style={{ transition: 'stroke-dasharray 0.2s ease, d 0.2s ease' }}
+                    style={{ transition: 'stroke-dasharray 0.25s ease, d 0.25s ease' }}
                   />
                 )}
               </svg>
@@ -465,10 +466,13 @@ export const SpeedTestView: React.FC = () => {
                     lineHeight: 1,
                     letterSpacing: '-0.02em',
                     color: 'var(--text-primary)',
+                    transition: 'all 0.3s ease',
                   }}
                 >
                   {stage === 'ping'
                     ? liveValue.toFixed(0)
+                    : stage === 'transition'
+                    ? downloadResult?.toFixed(1) ?? liveValue.toFixed(1)
                     : stage === 'complete'
                     ? downloadResult?.toFixed(1) ?? '—'
                     : liveValue > 0
@@ -477,15 +481,32 @@ export const SpeedTestView: React.FC = () => {
                 </div>
                 <div
                   style={{
-                    fontSize: 14,
+                    fontSize: 13,
                     fontWeight: 700,
                     textTransform: 'uppercase',
-                    letterSpacing: '0.05em',
-                    color: stage === 'ping' ? 'var(--series-ping)' : 'var(--brand-lilac)',
+                    letterSpacing: '0.06em',
+                    color:
+                      stage === 'ping'
+                        ? 'var(--series-ping)'
+                        : stage === 'transition'
+                        ? 'var(--status-success)'
+                        : 'var(--brand-lilac)',
                     marginTop: 4,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 5,
                   }}
                 >
-                  {stage === 'ping' ? 'ms (latency)' : 'Mbps'}
+                  {stage === 'ping' ? (
+                    'ms (latency)'
+                  ) : stage === 'transition' ? (
+                    <>
+                      <CheckCircle2 size={13} style={{ color: 'var(--status-success)' }} />
+                      <span>Download Locked</span>
+                    </>
+                  ) : (
+                    'Mbps'
+                  )}
                 </div>
               </div>
 
@@ -496,9 +517,11 @@ export const SpeedTestView: React.FC = () => {
                   bottom: 10,
                   fontSize: 12.5,
                   fontWeight: 500,
-                  color: 'var(--text-muted)',
+                  color: stage === 'transition' ? 'var(--brand-lilac)' : 'var(--text-muted)',
                   textAlign: 'center',
                   maxWidth: 240,
+                  lineHeight: 1.3,
+                  transition: 'all 0.2s ease',
                 }}
               >
                 {statusText}
@@ -587,15 +610,31 @@ export const SpeedTestView: React.FC = () => {
                 style={{
                   padding: '18px 20px',
                   borderRadius: 'var(--radius-md)',
-                  background: stage === 'download' ? 'rgba(192, 132, 252, 0.12)' : 'var(--bg-surface-subtle)',
-                  border: stage === 'download' ? '1px solid rgba(192, 132, 252, 0.5)' : '1px solid var(--border-subtle)',
+                  background:
+                    stage === 'download'
+                      ? 'rgba(192, 132, 252, 0.12)'
+                      : stage === 'transition'
+                      ? 'rgba(52, 211, 153, 0.12)'
+                      : 'var(--bg-surface-subtle)',
+                  border:
+                    stage === 'download'
+                      ? '1px solid rgba(192, 132, 252, 0.5)'
+                      : stage === 'transition'
+                      ? '1px solid rgba(52, 211, 153, 0.5)'
+                      : '1px solid var(--border-subtle)',
                   textAlign: 'center',
-                  transition: 'all 0.2s ease',
+                  transition: 'all 0.25s ease',
+                  position: 'relative',
                 }}
               >
                 <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
                   <ArrowDown size={15} style={{ color: 'var(--series-download)' }} />
                   <span>Download Speed</span>
+                  {stage === 'transition' && (
+                    <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--status-success)', marginLeft: 4 }}>
+                      ✓ LOCKED
+                    </span>
+                  )}
                 </div>
                 <div className="tabular-nums" style={{ fontSize: 32, fontWeight: 800 }}>
                   {downloadResult !== null ? (
@@ -614,15 +653,30 @@ export const SpeedTestView: React.FC = () => {
                 style={{
                   padding: '18px 20px',
                   borderRadius: 'var(--radius-md)',
-                  background: stage === 'upload' ? 'rgba(56, 189, 248, 0.12)' : 'var(--bg-surface-subtle)',
-                  border: stage === 'upload' ? '1px solid rgba(56, 189, 248, 0.5)' : '1px solid var(--border-subtle)',
+                  background:
+                    stage === 'upload'
+                      ? 'rgba(56, 189, 248, 0.12)'
+                      : stage === 'transition'
+                      ? 'rgba(168, 85, 247, 0.08)'
+                      : 'var(--bg-surface-subtle)',
+                  border:
+                    stage === 'upload'
+                      ? '1px solid rgba(56, 189, 248, 0.5)'
+                      : stage === 'transition'
+                      ? '1px dashed var(--border-strong)'
+                      : '1px solid var(--border-subtle)',
                   textAlign: 'center',
-                  transition: 'all 0.2s ease',
+                  transition: 'all 0.25s ease',
                 }}
               >
                 <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
                   <ArrowUp size={15} style={{ color: 'var(--series-upload)' }} />
                   <span>Upload Speed</span>
+                  {stage === 'transition' && (
+                    <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--brand-lilac)', marginLeft: 4 }}>
+                      • WARMING UP
+                    </span>
+                  )}
                 </div>
                 <div className="tabular-nums" style={{ fontSize: 32, fontWeight: 800 }}>
                   {uploadResult !== null ? (
