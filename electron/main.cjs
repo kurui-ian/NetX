@@ -34,20 +34,55 @@ function getDataFilePath() {
 
 function loadUsageStore() {
   const file = getDataFilePath();
+  let data = null;
   try {
     if (fs.existsSync(file)) {
-      return JSON.parse(fs.readFileSync(file, 'utf8'));
+      data = JSON.parse(fs.readFileSync(file, 'utf8'));
     }
   } catch {
     // ignore corrupt file
   }
+
+  if (!data || typeof data !== 'object') {
+    return {
+      lastBootAdapterRx: 0,
+      lastBootAdapterTx: 0,
+      daily: {},
+      hourly: {},
+      monthly: {},
+      appBytes: {},
+    };
+  }
+
+  // Sanitize legacy corrupted data from previous versions that dumped cumulative uptime into daily/monthly
+  const cleanDaily = {};
+  const cleanMonthly = {};
+
+  if (data.daily && typeof data.daily === 'object') {
+    for (const [dayKey, val] of Object.entries(data.daily)) {
+      if (!val || typeof val !== 'object') continue;
+      let rx = Number(val.rxBytes) || 0;
+      let tx = Number(val.txBytes) || 0;
+      // Filter out seed bug relics (> 15 GB dumped in a single session)
+      if (rx > 15_000_000_000) rx = Math.min(rx, 800_000_000);
+      if (tx > 8_000_000_000) tx = Math.min(tx, 300_000_000);
+
+      cleanDaily[dayKey] = { rxBytes: rx, txBytes: tx };
+
+      const mKey = dayKey.slice(0, 7);
+      if (!cleanMonthly[mKey]) cleanMonthly[mKey] = { rxBytes: 0, txBytes: 0 };
+      cleanMonthly[mKey].rxBytes += rx;
+      cleanMonthly[mKey].txBytes += tx;
+    }
+  }
+
   return {
     lastBootAdapterRx: 0,
     lastBootAdapterTx: 0,
-    daily: {}, // 'YYYY-MM-DD': { rxBytes, txBytes }
-    hourly: {}, // 'YYYY-MM-DD-HH': { rxBytes, txBytes }
-    monthly: {}, // 'YYYY-MM': { rxBytes, txBytes }
-    appBytes: {}, // processName: { todayBytes, monthBytes }
+    daily: cleanDaily,
+    hourly: data.hourly || {},
+    monthly: cleanMonthly,
+    appBytes: data.appBytes || {},
   };
 }
 
@@ -305,28 +340,10 @@ async function getIpConfigDetails() {
 // ============================================================================
 // Helper: Read Real Cumulative Interface Bytes & Measure Real Ping
 // ============================================================================
+// ============================================================================
+// Helper: Read Real Cumulative Interface Bytes & Measure Real Ping
+// ============================================================================
 async function getInterfaceBytes() {
-  try {
-    // Fast PowerShell one-liner using .NET NetworkInterface 64-bit counters
-    const cmd = `powershell -NoProfile -Command "[System.Net.NetworkInformation.NetworkInterface]::GetAllNetworkInterfaces() | Where-Object { $_.OperationalStatus -eq 'Up' -and $_.NetworkInterfaceType -ne 'Loopback' } | ForEach-Object { $s = $_.GetIPStatistics(); Write-Output ($_.Name + '|' + $s.BytesReceived + '|' + $s.BytesSent) }"`;
-    const { stdout } = await execAsync(cmd, { timeout: 2500 });
-    let totalRx = 0;
-    let totalTx = 0;
-    const lines = stdout.trim().split(/\r?\n/);
-    for (const line of lines) {
-      const parts = line.split('|');
-      if (parts.length === 3) {
-        totalRx += parseInt(parts[1], 10) || 0;
-        totalTx += parseInt(parts[2], 10) || 0;
-      }
-    }
-    if (totalRx > 0 || totalTx > 0) {
-      return { rxBytes: totalRx, txBytes: totalTx };
-    }
-  } catch {
-    // Fallback to netstat -e
-  }
-
   try {
     const { stdout } = await execAsync('netstat -e', { timeout: 1500 });
     const m = stdout.match(/Bytes\s+(\d+)\s+(\d+)/i);
@@ -360,8 +377,21 @@ async function measureQuickPing(host) {
   return { alive: false, timeMs: 0 };
 }
 
-// Update Persistent Usage Store with Real Byte Deltas
-function recordBytesDelta(rxBytes, txBytes) {
+let lastSaveUsageTime = 0;
+function debouncedSaveUsageStore() {
+  const now = Date.now();
+  if (now - lastSaveUsageTime > 8000) {
+    lastSaveUsageTime = now;
+    saveUsageStore();
+  }
+}
+
+// Update Persistent Usage Store ONLY with Real Byte Deltas
+function recordBytesDelta(dRx, dTx) {
+  if (dRx <= 0 && dTx <= 0) return;
+  // Discard absurd single-second anomalies (> 1 GB/sec)
+  if (dRx > 1_073_741_824 || dTx > 1_073_741_824) return;
+
   if (!usageStore) usageStore = loadUsageStore();
 
   const now = new Date();
@@ -369,49 +399,22 @@ function recordBytesDelta(rxBytes, txBytes) {
   const hourKey = `${dayKey}-${String(now.getHours()).padStart(2, '0')}`;
   const monthKey = dayKey.slice(0, 7); // YYYY-MM
 
-  // Handle first run or reboot where OS counters reset
-  if (
-    usageStore.lastBootAdapterRx === 0 ||
-    rxBytes < usageStore.lastBootAdapterRx ||
-    txBytes < usageStore.lastBootAdapterTx
-  ) {
-    // Seed today & month with the current OS boot session bytes if empty
-    if (!usageStore.daily[dayKey]) {
-      usageStore.daily[dayKey] = { rxBytes, txBytes };
-    }
-    if (!usageStore.monthly[monthKey]) {
-      usageStore.monthly[monthKey] = { rxBytes, txBytes };
-    }
-    if (!usageStore.hourly[hourKey]) {
-      usageStore.hourly[hourKey] = { rxBytes: Math.round(rxBytes * 0.25), txBytes: Math.round(txBytes * 0.25) };
-    }
-    usageStore.lastBootAdapterRx = rxBytes;
-    usageStore.lastBootAdapterTx = txBytes;
-    saveUsageStore();
-    return;
-  }
+  if (!usageStore.daily) usageStore.daily = {};
+  if (!usageStore.daily[dayKey]) usageStore.daily[dayKey] = { rxBytes: 0, txBytes: 0 };
+  usageStore.daily[dayKey].rxBytes += dRx;
+  usageStore.daily[dayKey].txBytes += dTx;
 
-  const deltaRx = Math.max(0, rxBytes - usageStore.lastBootAdapterRx);
-  const deltaTx = Math.max(0, txBytes - usageStore.lastBootAdapterTx);
+  if (!usageStore.hourly) usageStore.hourly = {};
+  if (!usageStore.hourly[hourKey]) usageStore.hourly[hourKey] = { rxBytes: 0, txBytes: 0 };
+  usageStore.hourly[hourKey].rxBytes += dRx;
+  usageStore.hourly[hourKey].txBytes += dTx;
 
-  if (deltaRx > 0 || deltaTx > 0) {
-    usageStore.lastBootAdapterRx = rxBytes;
-    usageStore.lastBootAdapterTx = txBytes;
+  if (!usageStore.monthly) usageStore.monthly = {};
+  if (!usageStore.monthly[monthKey]) usageStore.monthly[monthKey] = { rxBytes: 0, txBytes: 0 };
+  usageStore.monthly[monthKey].rxBytes += dRx;
+  usageStore.monthly[monthKey].txBytes += dTx;
 
-    if (!usageStore.daily[dayKey]) usageStore.daily[dayKey] = { rxBytes: 0, txBytes: 0 };
-    usageStore.daily[dayKey].rxBytes += deltaRx;
-    usageStore.daily[dayKey].txBytes += deltaTx;
-
-    if (!usageStore.hourly[hourKey]) usageStore.hourly[hourKey] = { rxBytes: 0, txBytes: 0 };
-    usageStore.hourly[hourKey].rxBytes += deltaRx;
-    usageStore.hourly[hourKey].txBytes += deltaTx;
-
-    if (!usageStore.monthly[monthKey]) usageStore.monthly[monthKey] = { rxBytes: 0, txBytes: 0 };
-    usageStore.monthly[monthKey].rxBytes += deltaRx;
-    usageStore.monthly[monthKey].txBytes += deltaTx;
-
-    saveUsageStore();
-  }
+  debouncedSaveUsageStore();
 }
 
 // ============================================================================
@@ -426,19 +429,29 @@ ipcMain.handle('netx:get-telemetry', async () => {
     fetchPublicIp(),
   ]);
 
+  let dRx = 0;
+  let dTx = 0;
+
   if (lastSampleTime > 0 && now > lastSampleTime) {
     const elapsedSec = (now - lastSampleTime) / 1000;
-    const dRx = Math.max(0, bytes.rxBytes - lastRxBytes);
-    const dTx = Math.max(0, bytes.txBytes - lastTxBytes);
-    currentDownloadMbps = Math.round(((dRx * 8) / (elapsedSec * 1_000_000)) * 100) / 100;
-    currentUploadMbps = Math.round(((dTx * 8) / (elapsedSec * 1_000_000)) * 100) / 100;
+    // Only calculate delta if counters advanced normally and didn't wrap/reset
+    if (lastRxBytes > 0 && bytes.rxBytes >= lastRxBytes && bytes.txBytes >= lastTxBytes) {
+      const candRx = bytes.rxBytes - lastRxBytes;
+      const candTx = bytes.txBytes - lastTxBytes;
+      // Filter out impossible single-second spikes (> 1.5 GB in 1 sec)
+      if (candRx < 1_610_612_736 && candTx < 1_610_612_736) {
+        dRx = candRx;
+        dTx = candTx;
+        currentDownloadMbps = Math.round(((dRx * 8) / (elapsedSec * 1_000_000)) * 100) / 100;
+        currentUploadMbps = Math.round(((dTx * 8) / (elapsedSec * 1_000_000)) * 100) / 100;
+        recordBytesDelta(dRx, dTx);
+      }
+    }
   }
 
   lastSampleTime = now;
   lastRxBytes = bytes.rxBytes;
   lastTxBytes = bytes.txBytes;
-
-  recordBytesDelta(bytes.rxBytes, bytes.txBytes);
 
   // Measure real ping to gateway & external DNS (1.1.1.1)
   const gatewayTarget = ipConfig.primaryGateway !== '—' ? ipConfig.primaryGateway : '1.1.1.1';
@@ -463,13 +476,13 @@ ipcMain.handle('netx:get-telemetry', async () => {
   // Compute usage totals from usageStore
   const dayKey = new Date().toISOString().slice(0, 10);
   const monthKey = dayKey.slice(0, 7);
-  const todayObj = (usageStore && usageStore.daily[dayKey]) || {
-    rxBytes: bytes.rxBytes,
-    txBytes: bytes.txBytes,
+  const todayObj = (usageStore && usageStore.daily && usageStore.daily[dayKey]) || {
+    rxBytes: 0,
+    txBytes: 0,
   };
-  const monthObj = (usageStore && usageStore.monthly[monthKey]) || {
-    rxBytes: bytes.rxBytes,
-    txBytes: bytes.txBytes,
+  const monthObj = (usageStore && usageStore.monthly && usageStore.monthly[monthKey]) || {
+    rxBytes: 0,
+    txBytes: 0,
   };
 
   return {
@@ -1290,8 +1303,8 @@ ipcMain.handle('netx:set-startup', (_event, { enabled, minimized }) => {
 
 ipcMain.handle('netx:clear-usage-history', () => {
   usageStore = {
-    lastBootAdapterRx: lastRxBytes,
-    lastBootAdapterTx: lastTxBytes,
+    lastBootAdapterRx: 0,
+    lastBootAdapterTx: 0,
     daily: {},
     hourly: {},
     monthly: {},
@@ -1310,40 +1323,69 @@ ipcMain.handle('netx:quit-app', () => {
 // Native Windows System Tray & BrowserWindow Setup
 // ============================================================================
 function createTrayIcon() {
+  const icoPath = path.join(__dirname, '..', 'public', 'netx-icon.ico');
+  const pngPath = path.join(__dirname, '..', 'public', 'netx-icon.png');
+  const svgPath = path.join(__dirname, '..', 'public', 'netx-icon.svg');
+
+  for (const iconFile of [icoPath, pngPath, svgPath]) {
+    if (fs.existsSync(iconFile)) {
+      try {
+        const img = nativeImage.createFromPath(iconFile);
+        if (!img.isEmpty()) {
+          return img.resize({ width: 32, height: 32 });
+        }
+      } catch {}
+    }
+  }
+
+  // Draw 32x32 purple wireframe globe icon directly as fallback
   const size = 32;
   const buf = Buffer.alloc(size * size * 4);
+  const cx = 15.5;
+  const cy = 15.5;
+  const r = 13.5;
+
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
       const idx = (y * size + x) * 4;
-      // Rounded square mask
-      const dx = Math.min(x, size - 1 - x);
-      const dy = Math.min(y, size - 1 - y);
-      if (dx + dy < 4) {
+      const dx = x - cx;
+      const dy = y - cy;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+
+      if (dist > r + 1.2) {
+        // Transparent outside
         buf[idx] = 0;
         buf[idx + 1] = 0;
         buf[idx + 2] = 0;
         buf[idx + 3] = 0;
         continue;
       }
-      // Pulse line across middle
-      const isPulse =
-        (y >= 15 && y <= 17 && x >= 5 && x <= 10) ||
-        (Math.abs(y - (22 - (x - 10) * 2)) <= 1.6 && x >= 10 && x <= 15) ||
-        (Math.abs(y - (12 + (x - 15) * 2.2)) <= 1.6 && x >= 15 && x <= 20) ||
-        (y >= 15 && y <= 17 && x >= 20 && x <= 26);
 
-      if (isPulse) {
-        // Mint (#2DD4BF -> BGRA: 191, 212, 45, 255)
-        buf[idx] = 191;
-        buf[idx + 1] = 212;
-        buf[idx + 2] = 45;
+      // Outer circle rim
+      const isRim = Math.abs(dist - r) <= 1.0;
+      // Vertical axis
+      const isVert = Math.abs(dx) <= 0.8 && dist <= r;
+      // Horizontal equator
+      const isHoriz = Math.abs(dy) <= 0.8 && dist <= r;
+      // Longitude ellipse curves (dx = +- sqrt(1 - (dy/r)^2) * (r * 0.55))
+      const dyFrac = dy / r;
+      const ellX = Math.sqrt(Math.max(0, 1 - dyFrac * dyFrac)) * (r * 0.58);
+      const isLong = Math.abs(Math.abs(dx) - ellX) <= 0.9 && dist <= r;
+      // Latitude curves (dy = +- (6.5 - (dx*dx)/32))
+      const isLat = Math.abs(Math.abs(dy) - (6.5 - (dx * dx) / 32)) <= 0.9 && dist <= r;
+
+      if (isRim || isVert || isHoriz || isLong || isLat) {
+        // Vibrant Neon Purple (#C084FC -> BGRA: 252, 132, 192, 255)
+        buf[idx] = 252;
+        buf[idx + 1] = 132;
+        buf[idx + 2] = 192;
         buf[idx + 3] = 255;
       } else {
-        // Deep Petrol Teal (#0B3B3C -> BGRA: 60, 59, 11, 255)
-        buf[idx] = 60;
-        buf[idx + 1] = 59;
-        buf[idx + 2] = 11;
-        buf[idx + 3] = 255;
+        // Deep obsidian background fill (#100A24 -> BGRA: 36, 10, 16, 220)
+        buf[idx] = 36;
+        buf[idx + 1] = 10;
+        buf[idx + 2] = 16;
+        buf[idx + 3] = 220;
       }
     }
   }
@@ -1387,6 +1429,14 @@ function updateTrayMenu() {
 }
 
 function createWindow() {
+  const icoPath = path.join(__dirname, '..', 'public', 'netx-icon.ico');
+  const pngPath = path.join(__dirname, '..', 'public', 'netx-icon.png');
+  const windowIcon = fs.existsSync(icoPath)
+    ? icoPath
+    : fs.existsSync(pngPath)
+    ? pngPath
+    : createTrayIcon();
+
   mainWindow = new BrowserWindow({
     width: 1300,
     height: 840,
@@ -1395,7 +1445,7 @@ function createWindow() {
     title: 'NetX — Network Utility & Telemetry',
     backgroundColor: '#091012',
     autoHideMenuBar: true,
-    icon: createTrayIcon(),
+    icon: windowIcon,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,

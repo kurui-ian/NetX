@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { ArrowDownRight, ArrowUpRight, BarChart3, Calendar } from 'lucide-react';
+import { ArrowDownRight, ArrowUpRight, BarChart3, Calendar, RotateCcw } from 'lucide-react';
 import { useNetX } from '../context/NetXContext';
 import { MetricTile, StatusBadge } from '../components/ui/Primitives';
 
@@ -18,12 +18,22 @@ export const DataUsageView: React.FC = () => {
     monthDownloadGb,
     monthUploadGb,
     usageStore,
+    clearUsageHistory,
     settings,
     apps,
     networkInfo,
   } = useNetX();
 
   const [range, setRange] = useState<UsageRange>('day');
+  const [resetting, setResetting] = useState(false);
+
+  const handleRecalibrate = async () => {
+    if (window.confirm('Reset data usage counters to 0 GB and recalibrate?')) {
+      setResetting(true);
+      await clearUsageHistory();
+      setResetting(false);
+    }
+  };
 
   // Build real bars from the persistent usageStore recorded on disk
   const { bars, weekTotalGb } = useMemo(() => {
@@ -157,20 +167,42 @@ export const DataUsageView: React.FC = () => {
             </p>
           </div>
 
-          {/* Day / Week / Month Segmented Control */}
-          <div className="segmented-control" role="tablist" aria-label="Usage timeframe">
-            {(['day', 'week', 'month'] as UsageRange[]).map((item) => (
-              <button
-                key={item}
-                type="button"
-                role="tab"
-                aria-selected={range === item}
-                className={`segmented-btn ${range === item ? 'active' : ''}`}
-                onClick={() => setRange(item)}
-              >
-                {item.charAt(0).toUpperCase() + item.slice(1)}
-              </button>
-            ))}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            {/* Day / Week / Month Segmented Control */}
+            <div className="segmented-control" role="tablist" aria-label="Usage timeframe">
+              {(['day', 'week', 'month'] as UsageRange[]).map((item) => (
+                <button
+                  key={item}
+                  type="button"
+                  role="tab"
+                  aria-selected={range === item}
+                  className={`segmented-btn ${range === item ? 'active' : ''}`}
+                  onClick={() => setRange(item)}
+                >
+                  {item.charAt(0).toUpperCase() + item.slice(1)}
+                </button>
+              ))}
+            </div>
+
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={handleRecalibrate}
+              disabled={resetting}
+              title="Reset and recalibrate local data counters to 0"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                fontSize: 12,
+                padding: '6px 12px',
+                borderRadius: 'var(--radius-pill)',
+                borderColor: 'var(--border-subtle)',
+              }}
+            >
+              <RotateCcw size={13} className={resetting ? 'spin' : ''} />
+              <span>{resetting ? 'Resetting...' : 'Recalibrate'}</span>
+            </button>
           </div>
         </div>
 

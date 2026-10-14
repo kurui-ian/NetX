@@ -80,6 +80,7 @@ interface NetXContextValue {
   monthDownloadGb: number;
   monthUploadGb: number;
   usageStore: UsageStoreData | null;
+  clearUsageHistory: () => Promise<void>;
   speedTestHistory: SpeedTestRecord[];
   addSpeedTestRecord: (record: Omit<SpeedTestRecord, 'id' | 'date'>) => void;
   clearSpeedTestHistory: () => void;
@@ -380,6 +381,27 @@ export const NetXProvider: React.FC<{ children: React.ReactNode }> = ({ children
     pushToast('Speed test history cleared.', 'info');
   }, [pushToast]);
 
+  const clearUsageHistory = useCallback(async () => {
+    if (window.netxNative?.clearUsageHistory) {
+      await window.netxNative.clearUsageHistory();
+    }
+    setUsageStore({
+      lastBootAdapterRx: 0,
+      lastBootAdapterTx: 0,
+      daily: {},
+      hourly: {},
+      monthly: {},
+      appBytes: {},
+    });
+    setTodayDownloadGb(0);
+    setTodayUploadGb(0);
+    setTodayUsageGb(0);
+    setMonthDownloadGb(0);
+    setMonthUploadGb(0);
+    setMonthUsageGb(0);
+    pushToast('Data usage counters have been recalibrated to zero.', 'success');
+  }, [pushToast]);
+
   return (
     <NetXContext.Provider
       value={{
@@ -409,6 +431,7 @@ export const NetXProvider: React.FC<{ children: React.ReactNode }> = ({ children
         monthDownloadGb,
         monthUploadGb,
         usageStore,
+        clearUsageHistory,
         speedTestHistory,
         addSpeedTestRecord,
         clearSpeedTestHistory,

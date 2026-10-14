@@ -138,6 +138,7 @@ export interface UsageStoreData {
   daily: Record<string, UsageBucket>;
   hourly: Record<string, UsageBucket>;
   monthly: Record<string, UsageBucket>;
+  appBytes?: Record<string, any>;
 }
 
 export interface NetXSettings {

@@ -10,7 +10,7 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "start": "electron .",
-    "package:exe": "npx.cmd @electron/packager . NetX --platform=win32 --arch=x64 --out=release --overwrite --ignore=\"^/(src|src-tauri|release|docs|\\.git)\""
+    "package:exe": "npx.cmd @electron/packager . NetX --platform=win32 --arch=x64 --out=release --overwrite --icon=public/netx-icon.ico --ignore=\"^/(src|src-tauri|release|docs|\\.git)\""
   },
   "dependencies": {
     "lucide-react": "^0.468.0",

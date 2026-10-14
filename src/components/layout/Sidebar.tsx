@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { useNetX } from '../../context/NetXContext';
 import { NavSection } from '../../types/netx';
+import { NetXGlobeIcon } from '../ui/NetXGlobeIcon';
 
 interface NavItemDef {
   id: NavSection;
@@ -114,7 +115,7 @@ export const Sidebar: React.FC = () => {
       <div className="sidebar-brand">
         <div className="sidebar-brand-left">
           <div className="brand-emblem" aria-hidden="true">
-            <Radio size={20} strokeWidth={2.4} />
+            <NetXGlobeIcon size={24} />
           </div>
           {!sidebarCollapsed && (
             <div className="brand-text-wrap">
