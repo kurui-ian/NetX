@@ -53,6 +53,12 @@ export const Sidebar: React.FC = () => {
 
   const primaryNav: NavItemDef[] = [
     { id: 'dashboard', label: 'Home', icon: <LayoutDashboard size={18} className="nav-icon" /> },
+    {
+      id: 'ai-assistant',
+      label: 'AI Assistant',
+      icon: <Sparkles size={18} className="nav-icon" style={{ color: 'var(--accent-purple)' }} />,
+      badge: 'Ollama',
+    },
     { id: 'speed-test', label: 'Speed Test', icon: <Gauge size={18} className="nav-icon" /> },
     { id: 'data-usage', label: 'Data Usage', icon: <BarChart3 size={18} className="nav-icon" /> },
     {

@@ -10,13 +10,22 @@ import {
   Palette,
   Power,
   Sun,
+  Sparkles,
+  Cpu,
+  CheckCircle2,
+  AlertTriangle,
+  Copy,
+  ExternalLink,
+  RefreshCw,
 } from 'lucide-react';
 import { useNetX } from '../context/NetXContext';
 import { AppearanceMode } from '../types/netx';
 import { Button, StatusBadge, ToggleSwitch } from '../components/ui/Primitives';
+import { checkOllamaConnection, RECOMMENDED_MODELS } from '../services/ollamaClient';
 
 type SettingsTab =
   | 'appearance'
+  | 'ai'
   | 'startup'
   | 'notifications'
   | 'monitoring'
@@ -35,9 +44,12 @@ export const SettingsView: React.FC = () => {
   } = useNetX();
 
   const [activeCategory, setActiveCategory] = useState<SettingsTab>('appearance');
+  const [testingOllama, setTestingOllama] = useState(false);
+  const [ollamaTestResult, setOllamaTestResult] = useState<{ online: boolean; version?: string; models: any[]; message?: string } | null>(null);
 
   const categories: { id: SettingsTab; label: string; icon: React.ReactNode }[] = [
     { id: 'appearance', label: 'Appearance', icon: <Palette size={16} /> },
+    { id: 'ai', label: 'AI & Ollama', icon: <Sparkles size={16} /> },
     { id: 'startup', label: 'Startup', icon: <Power size={16} /> },
     { id: 'notifications', label: 'Notifications', icon: <Bell size={16} /> },
     { id: 'monitoring', label: 'Monitoring', icon: <Activity size={16} /> },
@@ -191,6 +203,265 @@ export const SettingsView: React.FC = () => {
                     </label>
                   );
                 })}
+              </div>
+            </section>
+          )}
+
+          {activeCategory === 'ai' && (
+            <section aria-label="Local AI and Ollama settings">
+              <div className="surface-panel-header">
+                <div>
+                  <h2 className="surface-panel-title">AI &amp; Local LLM Engine (Ollama)</h2>
+                  <p className="surface-panel-subtitle">
+                    Configure your on-device neural network assistant. NetX AI operates 100% locally via Ollama with zero cloud API keys or external telemetry.
+                  </p>
+                </div>
+                <StatusBadge
+                  variant={ollamaTestResult?.online ? 'success' : 'info'}
+                  label={ollamaTestResult?.online ? 'Ollama Online' : 'Local Ollama Engine'}
+                />
+              </div>
+
+              <div className="kv-list" style={{ marginTop: 14 }}>
+                {/* 1. AI Provider Selection */}
+                <div className="kv-row">
+                  <div>
+                    <div style={{ fontWeight: 600 }}>AI Provider</div>
+                    <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                      Select the neural execution runtime for NetX Assistant.
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button
+                      className="btn-secondary"
+                      style={{
+                        background: 'var(--bg-surface-tinted)',
+                        borderColor: 'var(--brand-mint)',
+                        fontWeight: 650,
+                      }}
+                    >
+                      Local Ollama (Active)
+                    </button>
+                    <button
+                      className="btn-secondary"
+                      disabled
+                      title="Cloud AI is disabled to guarantee zero data leakage."
+                      style={{ opacity: 0.5, cursor: 'not-allowed' }}
+                    >
+                      Cloud AI (Disabled)
+                    </button>
+                  </div>
+                </div>
+
+                {/* 2. Ollama Server Host URL */}
+                <div className="kv-row">
+                  <div>
+                    <div style={{ fontWeight: 600 }}>Ollama Server URL</div>
+                    <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                      Local REST API endpoint (typically http://127.0.0.1:11434).
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <input
+                      type="text"
+                      className="text-input"
+                      value={settings.ollamaUrl}
+                      onChange={(e) => updateSettings({ ollamaUrl: e.target.value })}
+                      style={{
+                        padding: '6px 10px',
+                        fontSize: 13,
+                        width: 220,
+                        background: 'var(--bg-surface-subtle)',
+                        border: '1px solid var(--border-subtle)',
+                        borderRadius: 'var(--radius-sm)',
+                        color: 'var(--text-primary)',
+                      }}
+                    />
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      icon={<RefreshCw size={13} className={testingOllama ? 'spin' : ''} />}
+                      disabled={testingOllama}
+                      onClick={async () => {
+                        setTestingOllama(true);
+                        try {
+                          const res = await checkOllamaConnection(settings.ollamaUrl);
+                          setOllamaTestResult(res);
+                          if (res.online) {
+                            pushToast(`Connected to Ollama ${res.version || ''} (${res.models.length} model(s) found).`, 'success');
+                          } else {
+                            pushToast(`Ollama connection failed: ${res.error || 'Server offline'}`, 'warning');
+                          }
+                        } finally {
+                          setTestingOllama(false);
+                        }
+                      }}
+                    >
+                      Test Connection
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Connection Status Details */}
+                {ollamaTestResult && (
+                  <div
+                    style={{
+                      padding: '10px 14px',
+                      borderRadius: 'var(--radius-md)',
+                      background: ollamaTestResult.online
+                        ? 'rgba(16, 185, 129, 0.1)'
+                        : 'rgba(239, 68, 68, 0.1)',
+                      border: `1px solid ${
+                        ollamaTestResult.online ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'
+                      }`,
+                      fontSize: 13,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                    }}
+                  >
+                    {ollamaTestResult.online ? (
+                      <>
+                        <CheckCircle2 size={16} color="#10b981" />
+                        <span>
+                          <strong>Connected to Ollama {ollamaTestResult.version}</strong> — {ollamaTestResult.models.length} local model(s) detected.
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <AlertTriangle size={16} color="#ef4444" />
+                        <span>
+                          <strong>Offline:</strong> {ollamaTestResult.message || 'Ollama is not running on ' + settings.ollamaUrl}. Make sure the Ollama desktop service is started.
+                        </span>
+                      </>
+                    )}
+                  </div>
+                )}
+
+                {/* 3. Model Selector */}
+                <div className="kv-row">
+                  <div>
+                    <div style={{ fontWeight: 600 }}>Active Model Tag</div>
+                    <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                      Local model used for tool calling and reasoning.
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <input
+                      type="text"
+                      className="text-input"
+                      value={settings.ollamaModel}
+                      placeholder="e.g. llama3.2, mistral"
+                      onChange={(e) => updateSettings({ ollamaModel: e.target.value })}
+                      style={{
+                        padding: '6px 10px',
+                        fontSize: 13,
+                        width: 180,
+                        background: 'var(--bg-surface-subtle)',
+                        border: '1px solid var(--border-subtle)',
+                        borderRadius: 'var(--radius-sm)',
+                        color: 'var(--text-primary)',
+                      }}
+                    />
+                    {ollamaTestResult?.models && ollamaTestResult.models.length > 0 && (
+                      <select
+                        value={settings.ollamaModel}
+                        onChange={(e) => updateSettings({ ollamaModel: e.target.value })}
+                        style={{
+                          padding: '6px 10px',
+                          fontSize: 13,
+                          background: 'var(--bg-surface-subtle)',
+                          border: '1px solid var(--border-subtle)',
+                          borderRadius: 'var(--radius-sm)',
+                          color: 'var(--text-primary)',
+                        }}
+                      >
+                        {ollamaTestResult.models.map((m: any) => (
+                          <option key={m.name} value={m.name}>
+                            {m.name}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
+                </div>
+
+                {/* 4. Safety & Action Confirmation */}
+                <div className="kv-row">
+                  <div>
+                    <div style={{ fontWeight: 600 }}>Require Confirmation for Disruptive Actions</div>
+                    <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                      Prompt for explicit user confirmation before executing actions like DNS cache flush, DHCP lease renewal, or Wi-Fi disconnection.
+                    </div>
+                  </div>
+                  <ToggleSwitch
+                    checked={settings.aiConfirmActions}
+                    onChange={(checked) => updateSettings({ aiConfirmActions: checked })}
+                    label={settings.aiConfirmActions ? 'Enabled' : 'Disabled'}
+                  />
+                </div>
+
+                {/* 5. Temperature Setting */}
+                <div className="kv-row">
+                  <div>
+                    <div style={{ fontWeight: 600 }}>Model Temperature ({settings.aiTemperature})</div>
+                    <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                      Controls randomness. Lower values (0.2–0.4) produce more precise, deterministic network diagnostics.
+                    </div>
+                  </div>
+                  <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.1"
+                    value={settings.aiTemperature}
+                    onChange={(e) => updateSettings({ aiTemperature: parseFloat(e.target.value) })}
+                    style={{ width: 140 }}
+                  />
+                </div>
+
+                {/* 6. Recommended Models Guide */}
+                <div style={{ marginTop: 12, padding: 14, background: 'var(--bg-surface-subtle)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)' }}>
+                  <div style={{ fontWeight: 650, fontSize: 13.5, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <Cpu size={15} style={{ color: 'var(--accent-purple)' }} />
+                    Recommended Local Models for NetX
+                  </div>
+                  <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 10 }}>
+                    Install any model using your terminal:
+                  </p>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10 }}>
+                    {RECOMMENDED_MODELS.map((m) => (
+                      <div
+                        key={m.tag}
+                        style={{
+                          padding: 10,
+                          background: 'var(--bg-surface-tinted)',
+                          borderRadius: 'var(--radius-sm)',
+                          border: '1px solid var(--border-subtle)',
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span style={{ fontWeight: 700, fontSize: 13 }}>{m.name}</span>
+                          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{m.vram}</span>
+                        </div>
+                        <div style={{ fontSize: 11.5, color: 'var(--text-secondary)', margin: '4px 0 6px 0' }}>{m.description}</div>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'var(--bg-surface-subtle)', padding: '4px 8px', borderRadius: 4 }}>
+                          <code style={{ fontSize: 11, color: 'var(--accent-purple)' }}>{m.command}</code>
+                          <button
+                            className="btn-icon"
+                            onClick={() => {
+                              navigator.clipboard.writeText(m.command);
+                              pushToast(`Copied "${m.command}"`, 'info');
+                            }}
+                            style={{ width: 22, height: 22, padding: 0 }}
+                          >
+                            <Copy size={11} />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
             </section>
           )}

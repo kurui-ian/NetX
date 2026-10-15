@@ -27,6 +27,11 @@ const DEFAULT_SETTINGS: NetXSettings = {
   monthlyCapGb: 500,
   preferredInterface: 'Primary Active Interface',
   telemetryLocalOnly: true,
+  aiProvider: 'ollama',
+  ollamaUrl: 'http://127.0.0.1:11434',
+  ollamaModel: 'llama3.2',
+  aiTemperature: 0.4,
+  aiConfirmActions: true,
 };
 
 const EMPTY_NETWORK_INFO: RealNetworkInfo = {

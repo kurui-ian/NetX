@@ -29,6 +29,10 @@ const PAGE_META: Record<NavSection, { title: string; subtitle: string }> = {
     title: 'Network Overview',
     subtitle: 'Real-time connection status, throughput performance, and telemetry.',
   },
+  'ai-assistant': {
+    title: 'NetX AI Assistant',
+    subtitle: 'Local neural network operations, diagnostics & automated troubleshooting.',
+  },
   'speed-test': {
     title: 'Speed Test',
     subtitle: 'Measure your download speed, upload speed, and network latency.',

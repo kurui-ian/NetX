@@ -18,6 +18,7 @@ import { DiagnosticsView } from './views/DiagnosticsView';
 import { SettingsView } from './views/SettingsView';
 import { GamingModeView } from './views/GamingModeView';
 import { NetworkHistoryView } from './views/NetworkHistoryView';
+import { AiAssistantView } from './views/AiAssistantView';
 
 const NetXShell: React.FC = () => {
   const { activeNav, sidebarCollapsed, toasts } = useNetX();
@@ -80,6 +81,8 @@ const NetXShell: React.FC = () => {
     switch (activeNav) {
       case 'dashboard':
         return <DashboardView />;
+      case 'ai-assistant':
+        return <AiAssistantView />;
       case 'speed-test':
         return <SpeedTestView />;
       case 'data-usage':

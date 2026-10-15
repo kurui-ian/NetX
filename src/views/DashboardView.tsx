@@ -16,6 +16,7 @@ import {
   Server,
   Stethoscope,
   Wifi,
+  Sparkles,
 } from 'lucide-react';
 import { useNetX } from '../context/NetXContext';
 import { BandwidthGraph, Button, MetricTile, StatusBadge } from '../components/ui/Primitives';
@@ -42,6 +43,7 @@ export const DashboardView: React.FC = () => {
     setMonitoringPaused,
     apps,
     connections,
+    speedTestHistory,
     pushToast,
   } = useNetX();
 
@@ -159,6 +161,100 @@ export const DashboardView: React.FC = () => {
             </>
           }
         />
+      </section>
+
+      {/* =========================================================================
+          AI-POWERED NETWORK OPERATIONS & TELEMETRY SUMMARY
+          ========================================================================= */}
+      <section
+        className="surface-panel"
+        style={{
+          background: 'linear-gradient(135deg, rgba(124, 58, 237, 0.05), rgba(99, 102, 241, 0.02))',
+          borderColor: 'rgba(124, 58, 237, 0.25)',
+          padding: '18px 22px',
+          marginBottom: '16px',
+        }}
+        aria-label="AI Network Telemetry Summary"
+      >
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px', marginBottom: '12px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: 'linear-gradient(135deg, #7c3aed, #4f46e5)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', boxShadow: '0 2px 8px rgba(124, 58, 237, 0.3)' }}>
+              <Sparkles size={17} />
+            </div>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <h2 style={{ fontSize: '1rem', fontWeight: 700, margin: 0, color: 'var(--text-primary)' }}>
+                  AI Network Operations Summary
+                </h2>
+                <span className="badge-modern" style={{ background: 'rgba(124, 58, 237, 0.15)', color: 'var(--accent-purple)', fontSize: '0.72rem', padding: '2px 8px', borderRadius: '6px', fontWeight: 600 }}>
+                  Live Intelligence
+                </span>
+              </div>
+              <p style={{ margin: 0, fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+                Synthesized from hardware adapter counters, 4-hop topology, and edge benchmarks
+              </p>
+            </div>
+          </div>
+
+          <Button
+            variant="secondary"
+            size="sm"
+            icon={<Sparkles size={14} style={{ color: 'var(--accent-purple)' }} />}
+            onClick={() => setActiveNav('ai-assistant')}
+            style={{ fontWeight: 600 }}
+          >
+            Ask NetX AI Assistant
+          </Button>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '12px', marginTop: '12px' }}>
+          {/* Tile 1: Connectivity & Route Health */}
+          <div style={{ padding: '12px 14px', borderRadius: '10px', background: 'var(--bg-surface-subtle)', border: '1px solid var(--border-subtle)' }}>
+            <div style={{ fontSize: '0.76rem', color: 'var(--text-secondary)', fontWeight: 600, marginBottom: '4px', textTransform: 'uppercase' }}>
+              Route &amp; Interface Health
+            </div>
+            <div style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '4px' }}>
+              {connected && internetReachable ? '🟢 Route Fully Operational' : '⚠️ Connectivity Interrupted'}
+            </div>
+            <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+              Connected via {networkInfo.interfaceName} ({networkInfo.ssid !== 'Disconnected' ? networkInfo.ssid : 'Ethernet'}) · Gateway RTT {gatewayPingMs || 1} ms
+            </div>
+          </div>
+
+          {/* Tile 2: Speed Benchmark vs Traffic Throughput */}
+          <div style={{ padding: '12px 14px', borderRadius: '10px', background: 'var(--bg-surface-subtle)', border: '1px solid var(--border-subtle)' }}>
+            <div style={{ fontSize: '0.76rem', color: 'var(--text-secondary)', fontWeight: 600, marginBottom: '4px', textTransform: 'uppercase' }}>
+              Benchmark vs Live Throughput
+            </div>
+            <div style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '4px' }}>
+              {speedTestHistory.length > 0 ? (
+                <>↓ {speedTestHistory[0].downloadMbps.toFixed(1)} Mbps · ↑ {speedTestHistory[0].uploadMbps.toFixed(1)} Mbps</>
+              ) : (
+                'No benchmark run today'
+              )}
+            </div>
+            <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+              Live Traffic: ↓ {currentDownloadMbps.toFixed(2)} Mbps · ↑ {currentUploadMbps.toFixed(2)} Mbps
+            </div>
+          </div>
+
+          {/* Tile 3: Latency & Real-Time Stability */}
+          <div style={{ padding: '12px 14px', borderRadius: '10px', background: 'var(--bg-surface-subtle)', border: '1px solid var(--border-subtle)' }}>
+            <div style={{ fontSize: '0.76rem', color: 'var(--text-secondary)', fontWeight: 600, marginBottom: '4px', textTransform: 'uppercase' }}>
+              Interactive Suitability
+            </div>
+            <div style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '4px' }}>
+              {currentPingMs > 0 && currentPingMs < 45 && currentJitterMs < 8
+                ? '🟢 Competitive Gaming & 4K Ready'
+                : currentPingMs <= 90
+                ? '🟡 Good for Video Calls & Browsing'
+                : '🟠 Latency Elevated / Jitter Detected'}
+            </div>
+            <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+              Idle Ping: {currentPingMs || '—'} ms (Jitter: {currentJitterMs.toFixed(1)} ms) · DNS {dnsPingMs || 12} ms
+            </div>
+          </div>
+        </div>
       </section>
 
       {/* =========================================================================

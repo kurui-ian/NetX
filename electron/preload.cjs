@@ -22,5 +22,11 @@ contextBridge.exposeInMainWorld('netxNative', {
   toggleMiniMode: (enableMini) => ipcRenderer.invoke('netx:toggle-mini-mode', enableMini),
   setAlwaysOnTop: (flag) => ipcRenderer.invoke('netx:set-always-on-top', flag),
   clearUsageHistory: () => ipcRenderer.invoke('netx:clear-usage-history'),
+  flushDns: () => ipcRenderer.invoke('netx:flush-dns'),
+  renewDhcp: () => ipcRenderer.invoke('netx:renew-dhcp'),
+  disconnectWifi: () => ipcRenderer.invoke('netx:disconnect-wifi'),
+  connectWifi: (ssid, password) => ipcRenderer.invoke('netx:connect-wifi', { ssid, password }),
+  getOllamaStatus: (url) => ipcRenderer.invoke('netx:ollama-status', { url }),
+  chatOllama: (payload) => ipcRenderer.invoke('netx:ollama-chat', payload),
   quitApp: () => ipcRenderer.invoke('netx:quit-app'),
 });

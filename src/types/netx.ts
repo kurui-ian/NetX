@@ -1,5 +1,6 @@
 export type NavSection =
   | 'dashboard'
+  | 'ai-assistant'
   | 'speed-test'
   | 'data-usage'
   | 'applications'
@@ -158,6 +159,16 @@ export interface UsageStoreData {
   appBytes?: Record<string, any>;
 }
 
+export interface OllamaModelInfo {
+  name: string;
+  model: string;
+  size: number;
+  modifiedAt?: string;
+  family?: string;
+  parameterSize?: string;
+  format?: string;
+}
+
 export interface NetXSettings {
   appearance: AppearanceMode;
   startWithWindows: boolean;
@@ -169,6 +180,12 @@ export interface NetXSettings {
   monthlyCapGb: number;
   preferredInterface: string;
   telemetryLocalOnly: boolean;
+  // NetX AI & Ollama Configuration
+  aiProvider: 'ollama' | 'cloud-future';
+  ollamaUrl: string;
+  ollamaModel: string;
+  aiTemperature: number;
+  aiConfirmActions: boolean;
 }
 
 export interface ToastMessage {
@@ -195,6 +212,12 @@ declare global {
       setAlwaysOnTop: (flag: boolean) => Promise<{ ok: boolean; isAlwaysOnTop?: boolean }>;
       setStartupRegistry: (enabled: boolean, minimized: boolean) => Promise<any>;
       clearUsageHistory: () => Promise<any>;
+      flushDns: () => Promise<{ ok: boolean; output?: string; error?: string }>;
+      renewDhcp: () => Promise<{ ok: boolean; output?: string; error?: string }>;
+      disconnectWifi: () => Promise<{ ok: boolean; output?: string; error?: string }>;
+      connectWifi: (ssid: string, password?: string) => Promise<{ ok: boolean; connected: boolean; ssid: string; output?: string; interfaceInfo?: any; error?: string }>;
+      getOllamaStatus: (url?: string) => Promise<{ ok: boolean; online: boolean; version?: string; url?: string; models: OllamaModelInfo[]; error?: string }>;
+      chatOllama: (payload: { url?: string; model: string; messages: any[]; tools?: any[]; options?: any }) => Promise<{ ok: boolean; message?: any; done?: boolean; totalDuration?: number; evalCount?: number; error?: string }>;
       quitApp: () => Promise<any>;
     };
   }

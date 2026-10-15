@@ -19,6 +19,7 @@ import {
   Search,
   Settings,
   Shield,
+  Sparkles,
   Stethoscope,
   Sun,
   Wifi,
@@ -87,6 +88,18 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
         onClose();
       },
       keywords: ['home', 'overview', 'summary', 'bandwidth', 'speed'],
+    },
+    {
+      id: 'view-ai-assistant',
+      title: 'NetX AI Assistant',
+      subtitle: 'Local AI operations, natural language diagnostics & network automation',
+      category: 'Views',
+      icon: <Sparkles size={16} style={{ color: 'var(--accent-purple)' }} />,
+      action: () => {
+        setActiveNav('ai-assistant');
+        onClose();
+      },
+      keywords: ['ai', 'ollama', 'assistant', 'chat', 'diagnose', 'bot', 'llm', 'automation', 'ask'],
     },
     {
       id: 'view-speedtest',

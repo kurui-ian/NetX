@@ -1780,6 +1780,227 @@ ipcMain.handle('netx:quit-app', () => {
 });
 
 // ============================================================================
+// IPC 9: Safe Network Repair & Automation Operations
+// ============================================================================
+ipcMain.handle('netx:flush-dns', async () => {
+  try {
+    const { stdout } = await execAsync('ipconfig /flushdns', { timeout: 6000 });
+    return { ok: true, output: stdout.trim() };
+  } catch (err) {
+    return { ok: false, error: err.stdout || String(err) };
+  }
+});
+
+ipcMain.handle('netx:renew-dhcp', async () => {
+  try {
+    const { stdout } = await execAsync('ipconfig /renew', { timeout: 18000 });
+    return { ok: true, output: stdout.trim() };
+  } catch (err) {
+    return { ok: false, error: err.stdout || String(err) };
+  }
+});
+
+ipcMain.handle('netx:disconnect-wifi', async () => {
+  try {
+    const { stdout } = await execAsync('netsh wlan disconnect', { timeout: 5000 });
+    return { ok: true, output: stdout.trim() };
+  } catch (err) {
+    return { ok: false, error: err.stdout || String(err) };
+  }
+});
+
+ipcMain.handle('netx:connect-wifi', async (_event, { ssid, password = '' }) => {
+  if (!ssid || typeof ssid !== 'string') {
+    return { ok: false, error: 'Invalid SSID provided.' };
+  }
+  const cleanSsid = ssid.trim();
+  try {
+    // Check if profile exists
+    let hasProfile = false;
+    try {
+      const { stdout: profOut } = await execAsync(`netsh wlan show profiles name="${cleanSsid}"`, { timeout: 3500 });
+      if (!/not found/i.test(profOut) && /Profile/i.test(profOut)) {
+        hasProfile = true;
+      }
+    } catch {
+      hasProfile = false;
+    }
+
+    if (!hasProfile && password) {
+      const escapedSsid = cleanSsid
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+      const escapedPass = password
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+      const xml = `<?xml version="1.0"?>
+<WLANProfile xmlns="http://www.microsoft.com/networking/WLAN/profile/v1">
+  <name>${escapedSsid}</name>
+  <SSIDConfig>
+    <SSID>
+      <name>${escapedSsid}</name>
+    </SSID>
+  </SSIDConfig>
+  <connectionType>ESS</connectionType>
+  <connectionMode>auto</connectionMode>
+  <MSM>
+    <security>
+      <authEncryption>
+        <authentication>WPA2PSK</authentication>
+        <encryption>AES</encryption>
+        <useOneX>false</useOneX>
+      </authEncryption>
+      <sharedKey>
+        <keyType>passPhrase</keyType>
+        <protected>false</protected>
+        <keyMaterial>${escapedPass}</keyMaterial>
+      </sharedKey>
+    </security>
+  </MSM>
+</WLANProfile>`;
+      const tempPath = path.join(os.tmpdir(), `netx-wifi-${Date.now()}.xml`);
+      fs.writeFileSync(tempPath, xml, 'utf8');
+      try {
+        await execAsync(`netsh wlan add profile filename="${tempPath}" user=all`, { timeout: 4000 });
+      } finally {
+        try { fs.unlinkSync(tempPath); } catch {}
+      }
+    }
+
+    const { stdout: connOut } = await execAsync(`netsh wlan connect name="${cleanSsid}"`, { timeout: 6000 });
+
+    // Wait 3.5s for association and verify state
+    await new Promise((r) => setTimeout(r, 3500));
+    const iface = await getWifiInterfaceInfo();
+    const isNowConnected = Boolean(iface && iface.connected && iface.ssid.toLowerCase() === cleanSsid.toLowerCase());
+
+    return {
+      ok: true,
+      connected: isNowConnected,
+      ssid: cleanSsid,
+      output: connOut.trim(),
+      interfaceInfo: iface,
+    };
+  } catch (err) {
+    return { ok: false, connected: false, ssid: cleanSsid, error: err.stdout || String(err) };
+  }
+});
+
+// ============================================================================
+// IPC 10: Ollama Local AI Engine Integration
+// ============================================================================
+ipcMain.handle('netx:ollama-status', async (_event, { url } = {}) => {
+  const targetUrl = (url || 'http://127.0.0.1:11434').replace(/\/+$/, '');
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3500);
+    const [tagsRes, verRes] = await Promise.all([
+      fetch(`${targetUrl}/api/tags`, { signal: controller.signal }).catch(() => null),
+      fetch(`${targetUrl}/api/version`, { signal: controller.signal }).catch(() => null),
+    ]);
+    clearTimeout(timeout);
+
+    if (!tagsRes || !tagsRes.ok) {
+      return {
+        ok: false,
+        online: false,
+        error: 'Ollama is offline or unreachable at ' + targetUrl,
+        models: [],
+      };
+    }
+
+    const tagsData = await tagsRes.json();
+    let version = 'unknown';
+    if (verRes && verRes.ok) {
+      const verData = await verRes.json();
+      version = verData.version || 'unknown';
+    }
+
+    const models = (tagsData.models || []).map((m) => ({
+      name: m.name,
+      model: m.model || m.name,
+      size: m.size || 0,
+      modifiedAt: m.modified_at,
+      family: m.details?.family || '',
+      parameterSize: m.details?.parameter_size || '',
+      format: m.details?.format || 'gguf',
+    }));
+
+    return {
+      ok: true,
+      online: true,
+      version,
+      url: targetUrl,
+      models,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      online: false,
+      error: err.name === 'AbortError' ? 'Connection timed out' : err.message,
+      models: [],
+    };
+  }
+});
+
+ipcMain.handle('netx:ollama-chat', async (_event, { url, model, messages, tools, options = {} }) => {
+  const targetUrl = (url || 'http://127.0.0.1:11434').replace(/\/+$/, '');
+  if (!model) {
+    return { ok: false, error: 'No model specified' };
+  }
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 90000);
+
+    const payload = {
+      model,
+      messages,
+      stream: false,
+      options: {
+        temperature: typeof options.temperature === 'number' ? options.temperature : 0.4,
+        ...options,
+      },
+    };
+
+    if (tools && Array.isArray(tools) && tools.length > 0) {
+      payload.tools = tools;
+    }
+
+    const res = await fetch(`${targetUrl}/api/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+
+    if (!res.ok) {
+      const errorText = await res.text().catch(() => '');
+      return { ok: false, error: `Ollama error (HTTP ${res.status}): ${errorText}` };
+    }
+
+    const data = await res.json();
+    return {
+      ok: true,
+      message: data.message,
+      done: data.done,
+      totalDuration: data.total_duration,
+      evalCount: data.eval_count,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err.name === 'AbortError' ? 'Model inference timed out (90s limit reached)' : err.message,
+    };
+  }
+});
+
+// ============================================================================
 // Native Windows System Tray & BrowserWindow Setup
 // ============================================================================
 function createTrayIcon() {
