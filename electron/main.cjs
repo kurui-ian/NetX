@@ -1987,13 +1987,23 @@ ipcMain.handle('netx:gemini-chat', async (_event, { apiKey, model = 'gemini-3.5-
     if (cleanModel === 'gemini-1.5-flash' || cleanModel === 'gemini-2.0-flash' || cleanModel === 'gemini-2.5-flash') {
       cleanModel = 'gemini-3.5-flash';
     }
+    // Ensure low-latency instant thinking budget (0 reasoning tokens)
+    if (!payload.generationConfig) payload.generationConfig = {};
+    if (!payload.generationConfig.thinkingConfig) {
+      payload.generationConfig.thinkingConfig = { thinkingBudget: 0 };
+    }
+    if (!payload.generationConfig.maxOutputTokens) {
+      payload.generationConfig.maxOutputTokens = 600;
+    }
+
     const candidateModels = [cleanModel, cleanModel === 'gemini-3.5-flash' ? 'gemini-flash-latest' : 'gemini-3.5-flash'];
     let lastErr = '';
 
     for (const m of candidateModels) {
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent?key=${cleanKey}`;
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 45000);
+      // Fast 8-second timeout so user never experiences long stalls
+      const timeout = setTimeout(() => controller.abort(), 8000);
 
       const res = await fetch(url, {
         method: 'POST',

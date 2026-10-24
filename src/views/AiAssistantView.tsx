@@ -342,7 +342,80 @@ How can I help you today? Feel free to ask anything or tap one of the quick sugg
     setRunningActionStatus('NetX AI is thinking...');
 
     // ========================================================================
-    // PATH 1: Google Gemini Free Cloud AI (Recommended)
+    // FAST PATH: Instant Conversational Greetings & Small Talk (Sub-300ms)
+    // ========================================================================
+    const convIntent = matchConversationalIntent(query, userName);
+    if (convIntent) {
+      setRunningActionStatus('NetX AI is replying...');
+      // Brief 250ms bounce for visible yet ultra-snappy typing dots
+      await new Promise((r) => setTimeout(r, 250));
+      const directMsg: UIMessage = {
+        id: assistantMsgId,
+        role: 'assistant',
+        content: convIntent.replyText,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        suggestedActions: convIntent.suggestedActions,
+      };
+      setMessages((prev) => [...prev, directMsg]);
+      setIsProcessing(false);
+      setRunningActionStatus(null);
+      return;
+    }
+
+    // ========================================================================
+    // FAST PATH: Direct Network Intent Dispatch (Immediate local execution)
+    // Runs commands like "check wifi", "speed test", "ping 8.8.8.8", "connect to..."
+    // immediately without waiting for a 2-roundtrip 8-second cloud LLM loop.
+    // ========================================================================
+    const directTool = matchUserIntent(query);
+    if (directTool) {
+      const toolDef = findToolByName(directTool.toolName);
+      if (toolDef) {
+        const cleanArgs = toolDef.validateArgs(directTool.args).cleanArgs;
+
+        // Disruptive confirmation check
+        if (toolDef.requiresConfirmation && settings.aiConfirmActions) {
+          const confirmMsg: UIMessage = {
+            id: assistantMsgId,
+            role: 'assistant',
+            content: `I would like to run **${toolDef.displayName}**. Because this action could impact your network connection, please confirm below to proceed.`,
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            toolExecution: {
+              toolName: toolDef.name,
+              displayName: toolDef.displayName,
+              status: 'confirming',
+              args: cleanArgs,
+            },
+          };
+          setMessages((prev) => [...prev, confirmMsg]);
+          setIsProcessing(false);
+          setRunningActionStatus(null);
+          return;
+        }
+
+        // Run tool immediately
+        const toolMsg: UIMessage = {
+          id: assistantMsgId,
+          role: 'assistant',
+          content: `Running **${toolDef.displayName}** to inspect live network conditions...`,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          toolExecution: {
+            toolName: toolDef.name,
+            displayName: toolDef.displayName,
+            status: 'running',
+            args: cleanArgs,
+          },
+        };
+        setMessages((prev) => [...prev, toolMsg]);
+        await executeToolSafely(toolDef, cleanArgs, assistantMsgId);
+        setIsProcessing(false);
+        setRunningActionStatus(null);
+        return;
+      }
+    }
+
+    // ========================================================================
+    // PATH 1: Google Gemini Free Cloud AI (Fast Reasoning & Open-ended Chat)
     // ========================================================================
     const activeGeminiKey = (settings.geminiApiKey && settings.geminiApiKey.trim()) || DEFAULT_GEMINI_API_KEY;
     if (settings.aiProvider === 'gemini' && activeGeminiKey) {

@@ -158,7 +158,10 @@ export async function sendGeminiChat(
     tools: getGeminiToolsDeclaration(),
     generationConfig: {
       temperature,
-      maxOutputTokens: 1200,
+      maxOutputTokens: 600,
+      thinkingConfig: {
+        thinkingBudget: 0,
+      },
     },
   };
 
