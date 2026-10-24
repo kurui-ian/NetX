@@ -1977,36 +1977,44 @@ function getEmbeddedGeminiApiKey() {
 }
 const DEFAULT_GEMINI_API_KEY = getEmbeddedGeminiApiKey();
 
-ipcMain.handle('netx:gemini-chat', async (_event, { apiKey, model = 'gemini-flash-latest', payload }) => {
+ipcMain.handle('netx:gemini-chat', async (_event, { apiKey, model = 'gemini-3.5-flash', payload }) => {
   const cleanKey = (apiKey && apiKey.trim()) || process.env.GEMINI_API_KEY || DEFAULT_GEMINI_API_KEY;
   if (!cleanKey) {
     return { ok: false, error: 'No Google Gemini API key provided. Please set it in Settings.' };
   }
   try {
-    let cleanModel = (model || 'gemini-flash-latest').trim();
+    let cleanModel = (model || 'gemini-3.5-flash').trim();
     if (cleanModel === 'gemini-1.5-flash' || cleanModel === 'gemini-2.0-flash' || cleanModel === 'gemini-2.5-flash') {
-      cleanModel = 'gemini-flash-latest';
+      cleanModel = 'gemini-3.5-flash';
     }
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${cleanModel}:generateContent?key=${cleanKey}`;
-    
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 45000);
+    const candidateModels = [cleanModel, cleanModel === 'gemini-3.5-flash' ? 'gemini-flash-latest' : 'gemini-3.5-flash'];
+    let lastErr = '';
 
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-      signal: controller.signal,
-    });
-    clearTimeout(timeout);
+    for (const m of candidateModels) {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent?key=${cleanKey}`;
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 45000);
 
-    if (!res.ok) {
-      const errText = await res.text().catch(() => '');
-      return { ok: false, error: `Gemini API error (HTTP ${res.status}): ${errText}` };
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+
+      if (res.ok) {
+        const data = await res.json();
+        return { ok: true, data };
+      }
+
+      lastErr = await res.text().catch(() => '');
+      if (res.status !== 503 && res.status !== 404) {
+        return { ok: false, error: `Gemini API error (HTTP ${res.status}): ${lastErr}` };
+      }
     }
 
-    const data = await res.json();
-    return { ok: true, data };
+    return { ok: false, error: `Gemini API error: ${lastErr}` };
   } catch (err) {
     return {
       ok: false,

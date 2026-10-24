@@ -57,7 +57,7 @@ async function runConversationalTests() {
   console.log('\n--- 4. Testing Permanent Gemini API Key & Live Connectivity ---');
 
   assert(Boolean(DEFAULT_GEMINI_API_KEY && DEFAULT_GEMINI_API_KEY.startsWith('AQ.')), 'Permanent Gemini API key embedded');
-  assert(DEFAULT_GEMINI_MODEL === 'gemini-flash-latest', 'Default model configured as gemini-flash-latest');
+  assert(DEFAULT_GEMINI_MODEL === 'gemini-3.5-flash', 'Default model configured as gemini-3.5-flash');
 
   const keyCheck = await testGeminiApiKey(DEFAULT_GEMINI_API_KEY, DEFAULT_GEMINI_MODEL);
   assert(keyCheck.ok === true, `Live Gemini API key validated successfully with Google (error: ${keyCheck.error})`);

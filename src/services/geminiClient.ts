@@ -65,13 +65,13 @@ export function getEmbeddedGeminiApiKey(): string {
 }
 
 export const DEFAULT_GEMINI_API_KEY = getEmbeddedGeminiApiKey();
-export const DEFAULT_GEMINI_MODEL = 'gemini-flash-latest';
+export const DEFAULT_GEMINI_MODEL = 'gemini-3.5-flash';
 
 export function normalizeGeminiModel(model?: string): string {
   if (!model) return DEFAULT_GEMINI_MODEL;
   const m = model.trim();
   if (m === 'gemini-1.5-flash' || m === 'gemini-2.0-flash' || m === 'gemini-2.5-flash') {
-    return 'gemini-flash-latest';
+    return 'gemini-3.5-flash';
   }
   return m;
 }
@@ -114,17 +114,22 @@ export async function testGeminiApiKey(apiKey?: string, model?: string): Promise
   }
 
   try {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${cleanModel}:generateContent?key=${cleanKey}`;
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ role: 'user', parts: [{ text: 'Hello' }] }],
-      }),
-    });
-    if (res.ok) return { ok: true };
-    const errText = await res.text();
-    return { ok: false, error: `HTTP ${res.status}: ${errText}` };
+    const candidateModels = [cleanModel, cleanModel === 'gemini-3.5-flash' ? 'gemini-flash-latest' : 'gemini-3.5-flash'];
+    let lastErr = '';
+    for (const m of candidateModels) {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent?key=${cleanKey}`;
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ role: 'user', parts: [{ text: 'Hello' }] }],
+        }),
+      });
+      if (res.ok) return { ok: true };
+      lastErr = await res.text();
+      if (res.status !== 503 && res.status !== 404) break;
+    }
+    return { ok: false, error: lastErr };
   } catch (err: any) {
     return { ok: false, error: err?.message || String(err) };
   }
@@ -170,17 +175,25 @@ export async function sendGeminiChat(
     }
     rawData = res.data;
   } else {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${cleanModel}:generateContent?key=${cleanKey}`;
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-    if (!res.ok) {
-      const errText = await res.text();
-      return { ok: false, error: `HTTP ${res.status}: ${errText}` };
+    const candidateModels = [cleanModel, cleanModel === 'gemini-3.5-flash' ? 'gemini-flash-latest' : 'gemini-3.5-flash'];
+    let lastErr = '';
+    for (const m of candidateModels) {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent?key=${cleanKey}`;
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (res.ok) {
+        rawData = await res.json();
+        break;
+      }
+      lastErr = await res.text();
+      if (res.status !== 503 && res.status !== 404) break;
     }
-    rawData = await res.json();
+    if (!rawData) {
+      return { ok: false, error: lastErr };
+    }
   }
 
   const candidate = rawData?.candidates?.[0];
