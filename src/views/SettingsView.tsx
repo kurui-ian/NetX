@@ -46,6 +46,7 @@ export const SettingsView: React.FC = () => {
     updateSettings,
     resolvedTheme,
     networkInfo,
+    internetReachable,
     clearSpeedTestHistory,
     pushToast,
   } = useNetX();
@@ -229,14 +230,18 @@ export const SettingsView: React.FC = () => {
                 <StatusBadge
                   variant={
                     settings.aiProvider === 'gemini'
-                      ? settings.geminiApiKey ? 'success' : 'warning'
+                      ? internetReachable
+                        ? 'success'
+                        : 'info'
                       : settings.aiProvider === 'ollama'
                       ? (ollamaTestResult?.online ? 'success' : 'info')
                       : 'info'
                   }
                   label={
                     settings.aiProvider === 'gemini'
-                      ? (settings.geminiApiKey ? 'Gemini Flash (Active)' : 'Gemini Key Needed')
+                      ? internetReachable
+                        ? 'Gemini Cloud (Active)'
+                        : 'Offline Mode (Auto)'
                       : settings.aiProvider === 'ollama'
                       ? (ollamaTestResult?.online ? 'Ollama Online' : 'Local Ollama')
                       : 'Offline Native'

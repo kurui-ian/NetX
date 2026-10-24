@@ -107,6 +107,8 @@ export const AiAssistantView: React.FC = () => {
     updateSettings,
     pushToast,
     networkInfo,
+    internetReachable,
+    connected,
     currentDownloadMbps,
     currentUploadMbps,
     currentPingMs,
@@ -416,9 +418,16 @@ How can I help you today? Feel free to ask anything or tap one of the quick sugg
 
     // ========================================================================
     // PATH 1: Google Gemini Free Cloud AI (Fast Reasoning & Open-ended Chat)
+    // Auto-detects connectivity: uses Gemini when online, native engine when offline
     // ========================================================================
     const activeGeminiKey = (settings.geminiApiKey && settings.geminiApiKey.trim()) || DEFAULT_GEMINI_API_KEY;
-    if (settings.aiProvider === 'gemini' && activeGeminiKey) {
+    const canUseGemini =
+      settings.aiProvider !== 'ollama' &&
+      settings.aiProvider !== 'offline' &&
+      Boolean(activeGeminiKey) &&
+      internetReachable;
+
+    if (canUseGemini) {
       try {
         setRunningActionStatus('Thinking with Google Gemini...');
 
@@ -549,8 +558,8 @@ How can I help you today? Feel free to ask anything or tap one of the quick sugg
         setRunningActionStatus(null);
         return;
       } catch (err: any) {
-        console.error('Gemini error, falling back:', err);
-        fallbackToNativeEngine(query, assistantMsgId, err?.message);
+        console.warn('Gemini cloud call unavailable, seamlessly falling back to native engine:', err);
+        fallbackToNativeEngine(query, assistantMsgId);
         return;
       }
     }
@@ -798,20 +807,18 @@ How can I help you today? Feel free to ask anything or tap one of the quick sugg
     }
 
     // 3. Statement outside offline toolkit
-    await new Promise((r) => setTimeout(r, 380));
+    await new Promise((r) => setTimeout(r, 220));
+    const isOffline = !internetReachable;
     const helpMsg: UIMessage = {
       id: assistantMsgId,
       role: 'assistant',
-      content: `Hey **${userName}**, I don't have an answer for that in my offline network toolkit! 
+      content: isOffline
+        ? `Hey **${userName}**, your PC is currently **offline**! 📶
 
-${
-  apiError
-    ? `> ⚠️ *Connection Notice: ${apiError}*\n`
-    : !settings.geminiApiKey
-    ? `> 💡 *To chat freely about anything (just like ChatGPT), you can add a **free Google Gemini API key** in Settings.* It uses 0% of your PC's RAM and replies in under a second!\n`
-    : ''
-}
-In the meantime, I can check your available Wi-Fi networks, run an internet speed test, ping any server, or diagnose your connection. Try one of the options below!`,
+In offline mode, I can still scan available Wi-Fi networks, help you connect with your Wi-Fi password, ping your local gateway, or diagnose your network adapter. Once you reconnect to the internet, open-ended cloud conversations will resume automatically!`
+        : `Hey **${userName}**, I'm currently using the NetX Native Network Engine.
+
+I can scan all nearby Wi-Fi networks, run an internet speed test on Cloudflare Edge, ping any server, or run full diagnostics across your adapter and DNS. Choose an action below or tell me what to test!`,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       suggestedActions: [
         { label: '📶 Check Available Wi-Fi', query: 'Check for available Wi-Fi' },
@@ -975,21 +982,23 @@ ${result?.error || 'Failed to authenticate. Please ensure the security key is co
                   borderRadius: 12,
                   fontWeight: 650,
                   background:
-                    settings.aiProvider === 'gemini' && settings.geminiApiKey
+                    settings.aiProvider === 'gemini' && internetReachable
                       ? 'rgba(16, 185, 129, 0.15)'
                       : settings.aiProvider === 'ollama' && ollamaStatus.online
                       ? 'rgba(16, 185, 129, 0.15)'
                       : 'rgba(139, 92, 246, 0.15)',
                   color:
-                    settings.aiProvider === 'gemini' && settings.geminiApiKey
+                    settings.aiProvider === 'gemini' && internetReachable
                       ? '#10b981'
                       : settings.aiProvider === 'ollama' && ollamaStatus.online
                       ? '#10b981'
                       : 'var(--brand-lilac)',
                 }}
               >
-                {settings.aiProvider === 'gemini' && settings.geminiApiKey
-                  ? '⚡ Gemini Online'
+                {settings.aiProvider === 'gemini'
+                  ? internetReachable
+                    ? '⚡ Gemini Online (Cloud)'
+                    : '💻 Offline Mode (Auto)'
                   : settings.aiProvider === 'ollama' && ollamaStatus.online
                   ? `⚡ Ollama (${settings.ollamaModel})`
                   : '💻 Offline Native Engine'}

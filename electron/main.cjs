@@ -1996,35 +1996,44 @@ ipcMain.handle('netx:gemini-chat', async (_event, { apiKey, model = 'gemini-3.5-
       payload.generationConfig.maxOutputTokens = 600;
     }
 
-    const candidateModels = [cleanModel, cleanModel === 'gemini-3.5-flash' ? 'gemini-flash-latest' : 'gemini-3.5-flash'];
+    const candidateModels = [cleanModel];
+    if (cleanModel !== 'gemini-3.5-flash') candidateModels.push('gemini-3.5-flash');
+    if (!candidateModels.includes('gemini-flash-latest')) candidateModels.push('gemini-flash-latest');
+
     let lastErr = '';
 
     for (const m of candidateModels) {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent?key=${cleanKey}`;
-      const controller = new AbortController();
-      // Fast 8-second timeout so user never experiences long stalls
-      const timeout = setTimeout(() => controller.abort(), 8000);
+      try {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent?key=${cleanKey}`;
+        const controller = new AbortController();
+        // 20-second timeout allows international routes & slow mobile networks to complete
+        const timeout = setTimeout(() => controller.abort(), 20000);
 
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-        signal: controller.signal,
-      });
-      clearTimeout(timeout);
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+          signal: controller.signal,
+        });
+        clearTimeout(timeout);
 
-      if (res.ok) {
-        const data = await res.json();
-        return { ok: true, data };
-      }
+        if (res.ok) {
+          const data = await res.json();
+          return { ok: true, data };
+        }
 
-      lastErr = await res.text().catch(() => '');
-      if (res.status !== 503 && res.status !== 404) {
-        return { ok: false, error: `Gemini API error (HTTP ${res.status}): ${lastErr}` };
+        lastErr = await res.text().catch(() => '');
+        // If not temporary server load, report error
+        if (res.status !== 503 && res.status !== 404 && res.status !== 429) {
+          return { ok: false, error: `Gemini API error (HTTP ${res.status}): ${lastErr}` };
+        }
+      } catch (innerErr) {
+        lastErr = innerErr.name === 'AbortError' ? 'Gemini API timed out' : innerErr.message;
+        // Continue to fallback model if available
       }
     }
 
-    return { ok: false, error: `Gemini API error: ${lastErr}` };
+    return { ok: false, error: lastErr || 'Failed to connect to Google Gemini' };
   } catch (err) {
     return {
       ok: false,
