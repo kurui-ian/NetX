@@ -217,6 +217,95 @@ How can I help you today? Feel free to ask anything or tap one of the quick sugg
     refreshOllama();
   }, [settings.ollamaUrl]);
 
+  // Helper to generate verified natural text summaries
+  function generateNativeSummaryText(toolName: string, result: any, args: any): string {
+    switch (toolName) {
+      case 'run_speed_test':
+        return `✅ **Speed Test Completed**:
+* **Download Speed**: **${result.downloadMbps} Mbps**
+* **Upload Speed**: **${result.uploadMbps} Mbps**
+* **Idle Latency**: **${result.pingMs} ms** (Jitter: **${result.jitterMs} ms**)
+* **Test Endpoint**: ${result.server || 'Cloudflare Edge (Auto)'}
+* **Interface**: ${networkInfo.interfaceName} (${networkInfo.connectionType})`;
+
+      case 'diagnose_network':
+        return `### 🩺 Diagnostic Findings Overview
+${
+  result.overallPassed
+    ? '🟢 **All 4 baseline tests passed.** Your local network and internet routing are functioning normally.'
+    : '⚠️ **Diagnostic issues detected.** Review the breakdown below for root cause and repair recommendations.'
+}`;
+
+      case 'ping_host':
+        if (result?.summary) {
+          const s = result.summary;
+          return `📡 **Ping Results for \`${args.host}\`**:
+* Sent: **${s.sent}**, Received: **${s.received}**, Lost: **${s.lost} (${s.lossPct}% loss)**
+* Latency: Min = **${s.minMs} ms**, Max = **${s.maxMs} ms**, Avg = **${s.avgMs} ms**`;
+        }
+        return `📡 Ping completed for \`${args.host}\`.`;
+
+      case 'dns_lookup':
+        if (result?.records?.length > 0) {
+          return `🌐 **DNS Resolved for \`${args.domain}\`**: Found ${result.records.length} record(s) across A, AAAA, MX, NS, TXT.`;
+        }
+        return `⚠️ No DNS records found for \`${args.domain}\`.`;
+
+      case 'list_wifi_networks': {
+        const nets = result?.networks || [];
+        if (nets.length === 0) {
+          return `📶 **Wi-Fi Spectrum Scan**: No wireless networks detected in range. Ensure your Wi-Fi adapter is enabled.`;
+        }
+        const lines = nets.slice(0, 8).map((n: any) => {
+          const statusIcon = n.connected ? '🟢 *(Connected)*' : '📶';
+          return `* ${statusIcon} **${n.ssid}** — **${n.signalQuality}%** (${n.signalDbm} dBm) · ${n.band} · ${n.security}`;
+        });
+        return `### 📶 Available Wi-Fi Networks Nearby (${nets.length} detected)
+
+${lines.join('\n')}
+
+💡 *To connect, simply tell me the Wi-Fi name and password (e.g. "Connect to ${nets[0]?.ssid || 'Home_5G'} with password yourkey") or click Connect below!*`;
+      }
+
+      case 'connect_wifi': {
+        if (result?.connected || result?.ok) {
+          return `✅ **Successfully Connected to "${args.ssid}"**!
+* **Network Status**: Associated & Online
+* **Signal Quality**: ${result.interfaceInfo?.signalQuality || 100}% (${result.interfaceInfo?.signalDbm || -45} dBm)
+* **Link Speed**: ${result.interfaceInfo?.linkSpeedMbps || 144} Mbps
+* **Assigned IP**: ${result.interfaceInfo?.ipv4 || networkInfo.ipv4 || 'Configured via DHCP'}`;
+        }
+        return `❌ **Unable to Connect to "${args.ssid}"**:
+${result?.error || 'Failed to authenticate. Please ensure the security key is correct and the network is within range.'}`;
+      }
+
+      case 'discover_lan_devices':
+        return `🖥️ **LAN Device Discovery**: Found **${result?.devices?.length || 0}** active device(s) on your local subnet (${networkInfo.ipv4 || '192.168.1.0/24'}).`;
+
+      case 'flush_dns':
+        return `🧹 **DNS Cache Flushed Successfully**: Windows IP Configuration successfully flushed the DNS Resolver Cache.`;
+
+      case 'renew_dhcp':
+        return `🔄 **DHCP Lease Renewed**: Successfully re-acquired IP configuration from your local router.`;
+
+      case 'disconnect_wifi':
+        return `🔌 **Wi-Fi Disconnected**: Disconnected from active wireless network.`;
+
+      case 'export_diagnostic_report':
+        return `📁 **Diagnostic Report Saved**: Saved to \`${result.filePath || 'Desktop'}\`.`;
+
+      case 'get_network_summary':
+        return `### 📊 Live Network Overview
+* **Status**: ${networkInfo.connectionType} (${networkInfo.ssid !== 'Disconnected' ? networkInfo.ssid : networkInfo.interfaceName})
+* **IP Addresses**: Local \`${networkInfo.ipv4}\` · Gateway \`${networkInfo.gateway}\` · Public \`${networkInfo.publicIp}\`
+* **Real-Time Traffic**: ↓ ${currentDownloadMbps.toFixed(2)} Mbps · ↑ ${currentUploadMbps.toFixed(2)} Mbps
+* **Data Transferred Today**: **${todayUsageGb.toFixed(2)} GB** (Month: **${monthUsageGb.toFixed(2)} GB**)`;
+
+      default:
+        return `Action completed successfully.`;
+    }
+  }
+
   // Execute a Tool Safely and return structured results
   const executeToolSafely = async (
     toolDef: ToolDefinition,
@@ -261,11 +350,14 @@ How can I help you today? Feel free to ask anything or tap one of the quick sugg
         });
       }
 
+      const summaryText = generateNativeSummaryText(toolDef.name, result, cleanArgs);
+
       setMessages((prev) =>
         prev.map((m) => {
           if (m.id === messageId && m.toolExecution) {
             return {
               ...m,
+              content: summaryText,
               toolExecution: {
                 ...m.toolExecution,
                 status: 'completed',
@@ -307,6 +399,7 @@ How can I help you today? Feel free to ask anything or tap one of the quick sugg
           if (m.id === messageId && m.toolExecution) {
             return {
               ...m,
+              content: `❌ **${toolDef.displayName} Failed**: ${errStr}`,
               toolExecution: {
                 ...m.toolExecution,
                 status: 'failed',
@@ -440,9 +533,16 @@ How can I help you today? Feel free to ask anything or tap one of the quick sugg
             parts: [{ text: m.content }],
           }));
 
+        const lastSpeedTest = speedTestHistory[0];
+        let telemetrySnippet = `[Context: Interface=${networkInfo.interfaceName || 'Wi-Fi'}, Connection=${networkInfo.connectionType || 'Connected'}, SSID=${networkInfo.ssid || 'None'} (${networkInfo.signalQuality}% signal)`;
+        if (lastSpeedTest) {
+          telemetrySnippet += `, Recent Speed Test: ${lastSpeedTest.downloadMbps} Mbps down, ${lastSpeedTest.uploadMbps} Mbps up, ${lastSpeedTest.pingMs}ms latency on ${lastSpeedTest.server}`;
+        }
+        telemetrySnippet += `]`;
+
         geminiHistory.push({
           role: 'user',
-          parts: [{ text: query }],
+          parts: [{ text: `${telemetrySnippet}\n\n${query}` }],
         });
 
         const geminiRes = await sendGeminiChat(
@@ -832,95 +932,6 @@ I can scan all nearby Wi-Fi networks, run an internet speed test on Cloudflare E
     setRunningActionStatus(null);
   };
 
-  // Helper to generate verified natural text summaries
-  const generateNativeSummaryText = (toolName: string, result: any, args: any): string => {
-    switch (toolName) {
-      case 'run_speed_test':
-        return `✅ **Speed Test Completed**:
-* **Download Speed**: **${result.downloadMbps} Mbps**
-* **Upload Speed**: **${result.uploadMbps} Mbps**
-* **Idle Latency**: **${result.pingMs} ms** (Jitter: **${result.jitterMs} ms**)
-* **Test Endpoint**: ${result.server || 'Cloudflare Edge (Auto)'}
-* **Interface**: ${networkInfo.interfaceName} (${networkInfo.connectionType})`;
-
-      case 'diagnose_network':
-        return `### 🩺 Diagnostic Findings Overview
-${
-  result.overallPassed
-    ? '🟢 **All 4 baseline tests passed.** Your local network and internet routing are functioning normally.'
-    : '⚠️ **Diagnostic issues detected.** Review the breakdown below for root cause and repair recommendations.'
-}`;
-
-      case 'ping_host':
-        if (result?.summary) {
-          const s = result.summary;
-          return `📡 **Ping Results for \`${args.host}\`**:
-* Sent: **${s.sent}**, Received: **${s.received}**, Lost: **${s.lost} (${s.lossPct}% loss)**
-* Latency: Min = **${s.minMs} ms**, Max = **${s.maxMs} ms**, Avg = **${s.avgMs} ms**`;
-        }
-        return `📡 Ping completed for \`${args.host}\`.`;
-
-      case 'dns_lookup':
-        if (result?.records?.length > 0) {
-          return `🌐 **DNS Resolved for \`${args.domain}\`**: Found ${result.records.length} record(s) across A, AAAA, MX, NS, TXT.`;
-        }
-        return `⚠️ No DNS records found for \`${args.domain}\`.`;
-
-      case 'list_wifi_networks': {
-        const nets = result?.networks || [];
-        if (nets.length === 0) {
-          return `📶 **Wi-Fi Spectrum Scan**: No wireless networks detected in range. Ensure your Wi-Fi adapter is enabled.`;
-        }
-        const lines = nets.slice(0, 8).map((n: any) => {
-          const statusIcon = n.connected ? '🟢 *(Connected)*' : '📶';
-          return `* ${statusIcon} **${n.ssid}** — **${n.signalQuality}%** (${n.signalDbm} dBm) · ${n.band} · ${n.security}`;
-        });
-        return `### 📶 Available Wi-Fi Networks Nearby (${nets.length} detected)
-
-${lines.join('\n')}
-
-💡 *To connect, simply tell me the Wi-Fi name and password (e.g. "Connect to ${nets[0]?.ssid || 'Home_5G'} with password yourkey") or click Connect below!*`;
-      }
-
-      case 'connect_wifi': {
-        if (result?.connected || result?.ok) {
-          return `✅ **Successfully Connected to "${args.ssid}"**!
-* **Network Status**: Associated & Online
-* **Signal Quality**: ${result.interfaceInfo?.signalQuality || 100}% (${result.interfaceInfo?.signalDbm || -45} dBm)
-* **Link Speed**: ${result.interfaceInfo?.linkSpeedMbps || 144} Mbps
-* **Assigned IP**: ${result.interfaceInfo?.ipv4 || networkInfo.ipv4 || 'Configured via DHCP'}`;
-        }
-        return `❌ **Unable to Connect to "${args.ssid}"**:
-${result?.error || 'Failed to authenticate. Please ensure the security key is correct and the network is within range.'}`;
-      }
-
-      case 'discover_lan_devices':
-        return `🖥️ **LAN Device Discovery**: Found **${result?.devices?.length || 0}** active device(s) on your local subnet (${networkInfo.ipv4 || '192.168.1.0/24'}).`;
-
-      case 'flush_dns':
-        return `🧹 **DNS Cache Flushed Successfully**: Windows IP Configuration successfully flushed the DNS Resolver Cache.`;
-
-      case 'renew_dhcp':
-        return `🔄 **DHCP Lease Renewed**: Successfully re-acquired IP configuration from your local router.`;
-
-      case 'disconnect_wifi':
-        return `🔌 **Wi-Fi Disconnected**: Disconnected from active wireless network.`;
-
-      case 'export_diagnostic_report':
-        return `📁 **Diagnostic Report Saved**: Saved to \`${result.filePath || 'Desktop'}\`.`;
-
-      case 'get_network_summary':
-        return `### 📊 Live Network Overview
-* **Status**: ${networkInfo.connectionType} (${networkInfo.ssid !== 'Disconnected' ? networkInfo.ssid : networkInfo.interfaceName})
-* **IP Addresses**: Local \`${networkInfo.ipv4}\` · Gateway \`${networkInfo.gateway}\` · Public \`${networkInfo.publicIp}\`
-* **Real-Time Traffic**: ↓ ${currentDownloadMbps.toFixed(2)} Mbps · ↑ ${currentUploadMbps.toFixed(2)} Mbps
-* **Data Transferred Today**: **${todayUsageGb.toFixed(2)} GB** (Month: **${monthUsageGb.toFixed(2)} GB**)`;
-
-      default:
-        return `Action completed successfully.`;
-    }
-  };
-
   // Connect Wi-Fi trigger from card
   const handleInitiateWifiConnect = (messageId: string, ssid: string, security: string) => {
     const isOpen = security.toLowerCase().includes('open') || security.toLowerCase().includes('none');
@@ -1130,6 +1141,155 @@ ${result?.error || 'Failed to authenticate. Please ensure the security key is co
                         )}
                       </div>
                     ))}
+                  </div>
+                )}
+
+              {/* Speed Test Metrics Card (if run_speed_test completed) */}
+              {msg.toolExecution?.toolName === 'run_speed_test' &&
+                msg.toolExecution.status === 'completed' &&
+                msg.toolExecution.result && (
+                  <div
+                    style={{
+                      marginTop: 6,
+                      padding: '12px 14px',
+                      borderRadius: 12,
+                      background: 'var(--bg-surface-subtle)',
+                      border: '1px solid var(--border-subtle)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 10,
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, fontSize: '0.80rem', color: 'var(--brand-lilac)' }}>
+                        <Gauge size={15} />
+                        <span>VERIFIED SPEED TEST METRICS</span>
+                      </div>
+                      <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
+                        {msg.toolExecution.result.server || 'Cloudflare Edge (Auto)'}
+                      </span>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+                      <div
+                        style={{
+                          padding: '10px',
+                          borderRadius: 8,
+                          background: 'var(--bg-surface-elevated)',
+                          border: '1px solid var(--border-subtle)',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: 3,
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: '0.72rem', color: 'var(--text-secondary)', fontWeight: 600 }}>
+                          <Download size={13} style={{ color: '#10b981' }} />
+                          <span>DOWNLOAD</span>
+                        </div>
+                        <div style={{ fontSize: '1.28rem', fontWeight: 800, color: '#10b981' }}>
+                          {msg.toolExecution.result.downloadMbps ?? '--'}
+                          <span style={{ fontSize: '0.72rem', fontWeight: 600, marginLeft: 3 }}>Mbps</span>
+                        </div>
+                      </div>
+
+                      <div
+                        style={{
+                          padding: '10px',
+                          borderRadius: 8,
+                          background: 'var(--bg-surface-elevated)',
+                          border: '1px solid var(--border-subtle)',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: 3,
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: '0.72rem', color: 'var(--text-secondary)', fontWeight: 600 }}>
+                          <Upload size={13} style={{ color: '#c084fc' }} />
+                          <span>UPLOAD</span>
+                        </div>
+                        <div style={{ fontSize: '1.28rem', fontWeight: 800, color: '#c084fc' }}>
+                          {msg.toolExecution.result.uploadMbps ?? '--'}
+                          <span style={{ fontSize: '0.72rem', fontWeight: 600, marginLeft: 3 }}>Mbps</span>
+                        </div>
+                      </div>
+
+                      <div
+                        style={{
+                          padding: '10px',
+                          borderRadius: 8,
+                          background: 'var(--bg-surface-elevated)',
+                          border: '1px solid var(--border-subtle)',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: 3,
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: '0.72rem', color: 'var(--text-secondary)', fontWeight: 600 }}>
+                          <Activity size={13} style={{ color: 'var(--brand-lilac)' }} />
+                          <span>LATENCY</span>
+                        </div>
+                        <div style={{ fontSize: '1.28rem', fontWeight: 800, color: 'var(--text-primary)' }}>
+                          {msg.toolExecution.result.pingMs ?? '--'}
+                          <span style={{ fontSize: '0.72rem', fontWeight: 600, marginLeft: 3 }}>ms</span>
+                        </div>
+                        <div style={{ fontSize: '0.70rem', color: 'var(--text-muted)' }}>
+                          Jitter: {msg.toolExecution.result.jitterMs ?? 0} ms
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+              {/* Network Diagnostic Verification Card */}
+              {msg.toolExecution?.toolName === 'diagnose_network' &&
+                msg.toolExecution.status === 'completed' &&
+                msg.toolExecution.result?.steps && (
+                  <div
+                    style={{
+                      marginTop: 6,
+                      padding: '12px 14px',
+                      borderRadius: 12,
+                      background: 'var(--bg-surface-subtle)',
+                      border: '1px solid var(--border-subtle)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 8,
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, fontSize: '0.80rem', color: 'var(--brand-lilac)' }}>
+                      <ShieldCheck size={15} />
+                      <span>DIAGNOSTIC VERIFICATION STAGES</span>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                      {Object.entries(msg.toolExecution.result.steps).map(([k, step]: [string, any]) => (
+                        <div
+                          key={k}
+                          style={{
+                            padding: '8px 10px',
+                            borderRadius: 8,
+                            background: 'var(--bg-surface-elevated)',
+                            border: `1px solid ${step?.passed ? 'rgba(16, 185, 129, 0.25)' : 'rgba(239, 68, 68, 0.25)'}`,
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 8,
+                          }}
+                        >
+                          {step?.passed ? (
+                            <CheckCircle2 size={16} style={{ color: '#10b981', flexShrink: 0 }} />
+                          ) : (
+                            <XCircle size={16} style={{ color: '#ef4444', flexShrink: 0 }} />
+                          )}
+                          <div style={{ overflow: 'hidden' }}>
+                            <div style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-primary)', textTransform: 'capitalize' }}>
+                              {k} Check
+                            </div>
+                            <div style={{ fontSize: '0.70rem', color: 'var(--text-muted)', whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>
+                              {step?.passed ? `${step?.latencyMs ? `${step.latencyMs} ms · ` : ''}Normal` : step?.error || 'Issue detected'}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
 

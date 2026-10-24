@@ -65,13 +65,19 @@ export function getEmbeddedGeminiApiKey(): string {
 }
 
 export const DEFAULT_GEMINI_API_KEY = getEmbeddedGeminiApiKey();
-export const DEFAULT_GEMINI_MODEL = 'gemini-3.5-flash';
+export const DEFAULT_GEMINI_MODEL = 'gemini-3.5-flash-lite';
 
 export function normalizeGeminiModel(model?: string): string {
   if (!model) return DEFAULT_GEMINI_MODEL;
   const m = model.trim();
-  if (m === 'gemini-1.5-flash' || m === 'gemini-2.0-flash' || m === 'gemini-2.5-flash') {
-    return 'gemini-3.5-flash';
+  if (
+    m === 'gemini-1.5-flash' ||
+    m === 'gemini-2.0-flash' ||
+    m === 'gemini-2.5-flash' ||
+    m === 'gemini-3.5-flash' ||
+    m === 'gemini-3.6-flash'
+  ) {
+    return 'gemini-3.5-flash-lite';
   }
   return m;
 }
@@ -114,7 +120,9 @@ export async function testGeminiApiKey(apiKey?: string, model?: string): Promise
   }
 
   try {
-    const candidateModels = [cleanModel, cleanModel === 'gemini-3.5-flash' ? 'gemini-flash-latest' : 'gemini-3.5-flash'];
+    const candidateModels = [cleanModel];
+    if (cleanModel !== 'gemini-3.5-flash-lite') candidateModels.push('gemini-3.5-flash-lite');
+    if (!candidateModels.includes('gemini-flash-lite-latest')) candidateModels.push('gemini-flash-lite-latest');
     let lastErr = '';
     for (const m of candidateModels) {
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent?key=${cleanKey}`;
@@ -178,7 +186,9 @@ export async function sendGeminiChat(
     }
     rawData = res.data;
   } else {
-    const candidateModels = [cleanModel, cleanModel === 'gemini-3.5-flash' ? 'gemini-flash-latest' : 'gemini-3.5-flash'];
+    const candidateModels = [cleanModel];
+    if (cleanModel !== 'gemini-3.5-flash-lite') candidateModels.push('gemini-3.5-flash-lite');
+    if (!candidateModels.includes('gemini-flash-lite-latest')) candidateModels.push('gemini-flash-lite-latest');
     let lastErr = '';
     for (const m of candidateModels) {
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent?key=${cleanKey}`;

@@ -57,10 +57,24 @@ async function runConversationalTests() {
   console.log('\n--- 4. Testing Permanent Gemini API Key & Live Connectivity ---');
 
   assert(Boolean(DEFAULT_GEMINI_API_KEY && DEFAULT_GEMINI_API_KEY.startsWith('AQ.')), 'Permanent Gemini API key embedded');
-  assert(DEFAULT_GEMINI_MODEL === 'gemini-3.5-flash', 'Default model configured as gemini-3.5-flash');
+  assert(DEFAULT_GEMINI_MODEL === 'gemini-3.5-flash-lite', 'Default model configured as gemini-3.5-flash-lite');
 
   const keyCheck = await testGeminiApiKey(DEFAULT_GEMINI_API_KEY, DEFAULT_GEMINI_MODEL);
   assert(keyCheck.ok === true, `Live Gemini API key validated successfully with Google (error: ${keyCheck.error})`);
+
+  console.log('\n--- 5. Testing Speed Test Complaint Guard vs Direct Commands ---');
+
+  const directSpeed = matchUserIntent('run a speed test');
+  assert(directSpeed?.toolName === 'run_speed_test', 'Direct command "run a speed test" triggers run_speed_test');
+
+  const directSpeed2 = matchUserIntent('speedtest');
+  assert(directSpeed2?.toolName === 'run_speed_test', 'Direct command "speedtest" triggers run_speed_test');
+
+  const complaintSpeed = matchUserIntent('Why is my speed test so slow?');
+  assert(complaintSpeed?.toolName !== 'run_speed_test', 'Complaint "Why is my speed test so slow?" does NOT trigger run_speed_test');
+
+  const complaintSpeed2 = matchUserIntent('I want to complain about my terrible speed test results');
+  assert(complaintSpeed2?.toolName !== 'run_speed_test', 'Complaint about terrible speed test does NOT trigger run_speed_test');
 
   console.log('\n🎉 ALL CONVERSATIONAL & WI-FI SUITE TESTS PASSED!\n');
 }

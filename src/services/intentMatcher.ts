@@ -87,19 +87,28 @@ What would you like to check right now?`,
 export function matchUserIntent(query: string): MatchedIntent | null {
   const clean = query.trim().toLowerCase();
 
-  // 1. Speed Test
-  if (
-    /(?:speed\s*test|speedtest|test\s*(?:my|an|the)?\s*(?:internet\s*)?speed|benchmark\s*(?:my\s*)?speed|check\s*(?:my\s*)?speed)/i.test(clean) ||
-    clean === 'speed' ||
-    clean === 'speedtest'
-  ) {
-    return {
-      matched: true,
-      toolName: 'run_speed_test',
-      args: {},
-      title: 'Running Speed Test',
-      userQuery: query,
-    };
+  // Check if query is a question, explanation request, or complaint (should NOT blindly trigger execution)
+  const isQuestionOrComplaint =
+    /^(?:why|how|what|explain|tell|reason|is\s+my|why\s+did|why\s+is|could\s+you|can\s+you)\b/i.test(clean) ||
+    /\b(?:complain|complaint|terrible|horrible|poor|bad|slow|awful|dropping|dropped|lagging|laggy|unstable|fluctuat|disappoint|sucks|rubbish|issue|problem)\b/i.test(clean);
+
+  // 1. Explicit Speed Test Execution Command (only when actively commanding, not when complaining)
+  if (!isQuestionOrComplaint) {
+    if (
+      /^(?:run|start|begin|do|perform|launch|take)\s+(?:an?\s+)?(?:internet\s+)?speed\s*test\b/i.test(clean) ||
+      /^(?:speed\s*test|speedtest|test\s*(?:my|the|an)?\s*(?:internet\s*)?speed|benchmark\s*(?:my\s*)?speed|check\s*(?:my\s*)?speed)$/i.test(clean) ||
+      clean === 'speed' ||
+      clean === 'speedtest' ||
+      clean === 'test speed'
+    ) {
+      return {
+        matched: true,
+        toolName: 'run_speed_test',
+        args: {},
+        title: 'Running Speed Test',
+        userQuery: query,
+      };
+    }
   }
 
   // 2. Network Diagnostics / "Why is my internet slow"

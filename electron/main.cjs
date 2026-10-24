@@ -1977,15 +1977,21 @@ function getEmbeddedGeminiApiKey() {
 }
 const DEFAULT_GEMINI_API_KEY = getEmbeddedGeminiApiKey();
 
-ipcMain.handle('netx:gemini-chat', async (_event, { apiKey, model = 'gemini-3.5-flash', payload }) => {
+ipcMain.handle('netx:gemini-chat', async (_event, { apiKey, model = 'gemini-3.5-flash-lite', payload }) => {
   const cleanKey = (apiKey && apiKey.trim()) || process.env.GEMINI_API_KEY || DEFAULT_GEMINI_API_KEY;
   if (!cleanKey) {
     return { ok: false, error: 'No Google Gemini API key provided. Please set it in Settings.' };
   }
   try {
-    let cleanModel = (model || 'gemini-3.5-flash').trim();
-    if (cleanModel === 'gemini-1.5-flash' || cleanModel === 'gemini-2.0-flash' || cleanModel === 'gemini-2.5-flash') {
-      cleanModel = 'gemini-3.5-flash';
+    let cleanModel = (model || 'gemini-3.5-flash-lite').trim();
+    if (
+      cleanModel === 'gemini-1.5-flash' ||
+      cleanModel === 'gemini-2.0-flash' ||
+      cleanModel === 'gemini-2.5-flash' ||
+      cleanModel === 'gemini-3.5-flash' ||
+      cleanModel === 'gemini-3.6-flash'
+    ) {
+      cleanModel = 'gemini-3.5-flash-lite';
     }
     // Ensure low-latency instant thinking budget (0 reasoning tokens)
     if (!payload.generationConfig) payload.generationConfig = {};
@@ -1997,8 +2003,8 @@ ipcMain.handle('netx:gemini-chat', async (_event, { apiKey, model = 'gemini-3.5-
     }
 
     const candidateModels = [cleanModel];
-    if (cleanModel !== 'gemini-3.5-flash') candidateModels.push('gemini-3.5-flash');
-    if (!candidateModels.includes('gemini-flash-latest')) candidateModels.push('gemini-flash-latest');
+    if (cleanModel !== 'gemini-3.5-flash-lite') candidateModels.push('gemini-3.5-flash-lite');
+    if (!candidateModels.includes('gemini-flash-lite-latest')) candidateModels.push('gemini-flash-lite-latest');
 
     let lastErr = '';
 

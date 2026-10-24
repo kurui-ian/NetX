@@ -30,7 +30,7 @@ const DEFAULT_SETTINGS: NetXSettings = {
   telemetryLocalOnly: true,
   aiProvider: 'gemini',
   geminiApiKey: DEFAULT_GEMINI_API_KEY,
-  geminiModel: 'gemini-flash-latest',
+  geminiModel: DEFAULT_GEMINI_MODEL,
   ollamaUrl: 'http://127.0.0.1:11434',
   ollamaModel: 'llama3.2',
   aiTemperature: 0.4,
