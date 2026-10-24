@@ -455,10 +455,17 @@ ipcMain.handle('netx:get-telemetry', async () => {
 
   // Measure real ping to gateway & external DNS (1.1.1.1)
   const gatewayTarget = ipConfig.primaryGateway !== '—' ? ipConfig.primaryGateway : '1.1.1.1';
-  const [gwPing, dnsPing] = await Promise.all([
+  let [gwPing, dnsPing] = await Promise.all([
     measureQuickPing(gatewayTarget),
     measureQuickPing('1.1.1.1'),
   ]);
+
+  if (!dnsPing.alive) {
+    const backupDns = await measureQuickPing('8.8.8.8');
+    if (backupDns.alive) {
+      dnsPing = backupDns;
+    }
+  }
 
   if (dnsPing.alive) {
     if (lastPingMs > 0) {
@@ -1993,11 +2000,9 @@ ipcMain.handle('netx:gemini-chat', async (_event, { apiKey, model = 'gemini-3.5-
     ) {
       cleanModel = 'gemini-3.5-flash-lite';
     }
-    // Ensure low-latency instant thinking budget (0 reasoning tokens)
+    // Ensure clean generationConfig without unsupported thinkingConfig
     if (!payload.generationConfig) payload.generationConfig = {};
-    if (!payload.generationConfig.thinkingConfig) {
-      payload.generationConfig.thinkingConfig = { thinkingBudget: 0 };
-    }
+    delete payload.generationConfig.thinkingConfig;
     if (!payload.generationConfig.maxOutputTokens) {
       payload.generationConfig.maxOutputTokens = 600;
     }

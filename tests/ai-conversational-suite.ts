@@ -4,6 +4,8 @@ import {
   DEFAULT_GEMINI_API_KEY,
   DEFAULT_GEMINI_MODEL,
   testGeminiApiKey,
+  sendGeminiChat,
+  GeminiChatTurn,
 } from '../src/services/geminiClient';
 
 function assert(condition: boolean, msg: string) {
@@ -75,6 +77,48 @@ async function runConversationalTests() {
 
   const complaintSpeed2 = matchUserIntent('I want to complain about my terrible speed test results');
   assert(complaintSpeed2?.toolName !== 'run_speed_test', 'Complaint about terrible speed test does NOT trigger run_speed_test');
+
+  console.log('\n--- 6. Testing End-to-End Live Gemini Two-Turn Function Calling Flow ---');
+
+  // Turn 1: User asks Gemini to test speed
+  const userTurn: GeminiChatTurn = { role: 'user', parts: [{ text: 'Run an internet speed test' }] };
+  const turn1Res = await sendGeminiChat(DEFAULT_GEMINI_API_KEY, DEFAULT_GEMINI_MODEL, [userTurn]);
+  assert(turn1Res.ok === true, `Turn 1 successful: ${turn1Res.error || 'ok'}`);
+  assert(turn1Res.toolCall?.name === 'run_speed_test', `Gemini triggered function call: ${turn1Res.toolCall?.name}`);
+
+  // Turn 2: Feed simulated tool result back and verify synthesis
+  const simulatedSpeedResult = {
+    downloadMbps: 92.4,
+    uploadMbps: 41.6,
+    pingMs: 14,
+    jitterMs: 1.8,
+    server: 'Cloudflare Anycast Edge',
+    status: 'complete'
+  };
+
+  const followUpTurns: GeminiChatTurn[] = [
+    userTurn,
+    {
+      role: 'model',
+      parts: turn1Res.rawParts || [{ functionCall: { name: 'run_speed_test', args: {} } }]
+    },
+    {
+      role: 'user',
+      parts: [
+        {
+          functionResponse: {
+            name: 'run_speed_test',
+            response: { output: simulatedSpeedResult }
+          }
+        }
+      ]
+    }
+  ];
+
+  const turn2Res = await sendGeminiChat(DEFAULT_GEMINI_API_KEY, DEFAULT_GEMINI_MODEL, followUpTurns);
+  assert(turn2Res.ok === true, `Turn 2 synthesis successful: ${turn2Res.error || 'ok'}`);
+  assert(Boolean(turn2Res.text && turn2Res.text.length > 10), 'Gemini returned synthesized conversational text output (not quiet)');
+  console.log(`\nSample synthesized AI response:\n${turn2Res.text?.slice(0, 160)}...`);
 
   console.log('\n🎉 ALL CONVERSATIONAL & WI-FI SUITE TESTS PASSED!\n');
 }

@@ -15,7 +15,7 @@ import {
   UsageStoreData,
   WifiNetworkItem,
 } from '../types/netx';
-import { DEFAULT_GEMINI_API_KEY, DEFAULT_GEMINI_MODEL } from '../services/geminiClient';
+import { DEFAULT_GEMINI_API_KEY, DEFAULT_GEMINI_MODEL, normalizeGeminiModel } from '../services/geminiClient';
 
 const DEFAULT_SETTINGS: NetXSettings = {
   appearance: 'dark',
@@ -125,12 +125,7 @@ export const NetXProvider: React.FC<{ children: React.ReactNode }> = ({ children
         parsed.geminiApiKey && parsed.geminiApiKey.trim()
           ? parsed.geminiApiKey.trim()
           : DEFAULT_SETTINGS.geminiApiKey;
-      const geminiModel =
-        parsed.geminiModel &&
-        parsed.geminiModel !== 'gemini-1.5-flash' &&
-        parsed.geminiModel !== 'gemini-2.0-flash'
-          ? parsed.geminiModel
-          : DEFAULT_SETTINGS.geminiModel;
+      const geminiModel = normalizeGeminiModel(parsed.geminiModel);
       return {
         ...DEFAULT_SETTINGS,
         ...parsed,

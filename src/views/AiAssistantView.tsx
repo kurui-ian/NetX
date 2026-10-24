@@ -639,6 +639,15 @@ ${result?.error || 'Failed to authenticate. Please ensure the security key is co
                     : m
                 )
               );
+            } else {
+              const summaryText = generateNativeSummaryText(toolDef.name, toolResult, cleanArgs);
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === assistantMsgId
+                    ? { ...m, content: summaryText }
+                    : m
+                )
+              );
             }
             setIsProcessing(false);
             setRunningActionStatus(null);
