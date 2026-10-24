@@ -2139,8 +2139,25 @@ function createWindow() {
 
   mainWindow.setMenuBarVisibility(false);
 
-  const distIndex = path.join(__dirname, '..', 'dist', 'index.html');
-  mainWindow.loadFile(distIndex);
+  const devServerUrl = process.env.VITE_DEV_SERVER_URL;
+  if (devServerUrl) {
+    mainWindow.loadURL(devServerUrl);
+    // Helpful dev shortcuts: F12 toggles DevTools, F5 or Ctrl+R reloads
+    mainWindow.webContents.on('before-input-event', (event, input) => {
+      if (input.type === 'keyDown') {
+        if (input.key === 'F12') {
+          mainWindow.webContents.toggleDevTools();
+          event.preventDefault();
+        } else if (input.key === 'F5' || (input.control && input.key.toLowerCase() === 'r')) {
+          mainWindow.webContents.reloadIgnoringCache();
+          event.preventDefault();
+        }
+      }
+    });
+  } else {
+    const distIndex = path.join(__dirname, '..', 'dist', 'index.html');
+    mainWindow.loadFile(distIndex);
+  }
 
   if (process.argv.includes('--minimized')) {
     mainWindow.hide();

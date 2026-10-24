@@ -20,7 +20,27 @@ NetX is a standalone Windows `.exe` desktop network utility that reads **100% re
 - **Real Interactive Network Tools & Guided Diagnostics**:
   - Executes real `ping.exe`, `tracert.exe`, Node `dns.promises` (`A`, `AAAA`, `MX`, `NS`, `TXT`), and live `net.Socket` TCP port handshakes.
 
-## Building & Launching `NetX.exe`
+---
+
+## ⚡ Live Development (Hot Reloading & Auto-Restart)
+
+Run NetX in live development mode with instant Hot Module Replacement (HMR) — zero rebuilds or re-installations needed:
+
+```powershell
+# Launch the live development desktop application
+npm.cmd run dev
+
+# Or simply double-click the included batch launcher:
+.\dev.bat
+```
+
+- **Instant UI Updates**: Any code edits in `src/` (React components, design system CSS, views) reflect in the desktop app immediately via Vite HMR without losing state or reloading.
+- **Auto-Restarting Backend**: Any edits in `electron/` (`main.cjs`, `preload.cjs`) automatically restart the desktop app window.
+- **Developer Shortcuts**: Press `F12` inside the app to toggle Chrome DevTools, or `F5`/`Ctrl+R` to hard reload.
+
+---
+
+## 📦 Building & Launching Standalone `NetX.exe`
 
 ```powershell
 # Build frontend & package standalone Windows executable
