@@ -1950,6 +1950,57 @@ ipcMain.handle('netx:ollama-status', async (_event, { url } = {}) => {
   }
 });
 
+
+// ============================================================================
+// IPC 11: Google Gemini Cloud AI & System User
+// ============================================================================
+ipcMain.handle('netx:get-system-user', () => {
+  try {
+    const userInfo = os.userInfo();
+    return {
+      username: userInfo.username || 'Kurui',
+      hostname: os.hostname(),
+    };
+  } catch {
+    return { username: 'Kurui', hostname: os.hostname() };
+  }
+});
+
+ipcMain.handle('netx:gemini-chat', async (_event, { apiKey, model = 'gemini-1.5-flash', payload }) => {
+  if (!apiKey) {
+    return { ok: false, error: 'No Google Gemini API key provided. Please set it in Settings.' };
+  }
+  try {
+    const cleanKey = apiKey.trim();
+    const cleanModel = (model || 'gemini-1.5-flash').trim();
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${cleanModel}:generateContent?key=${cleanKey}`;
+    
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 45000);
+
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      return { ok: false, error: `Gemini API error (HTTP ${res.status}): ${errText}` };
+    }
+
+    const data = await res.json();
+    return { ok: true, data };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err.name === 'AbortError' ? 'Gemini API timed out' : err.message,
+    };
+  }
+});
+
 ipcMain.handle('netx:ollama-chat', async (_event, { url, model, messages, tools, options = {} }) => {
   const targetUrl = (url || 'http://127.0.0.1:11434').replace(/\/+$/, '');
   if (!model) {

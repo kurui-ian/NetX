@@ -27,11 +27,14 @@ const DEFAULT_SETTINGS: NetXSettings = {
   monthlyCapGb: 500,
   preferredInterface: 'Primary Active Interface',
   telemetryLocalOnly: true,
-  aiProvider: 'ollama',
+  aiProvider: 'gemini',
+  geminiApiKey: '',
+  geminiModel: 'gemini-1.5-flash',
   ollamaUrl: 'http://127.0.0.1:11434',
   ollamaModel: 'llama3.2',
   aiTemperature: 0.4,
   aiConfirmActions: true,
+  customUserName: '',
 };
 
 const EMPTY_NETWORK_INFO: RealNetworkInfo = {

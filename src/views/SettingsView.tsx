@@ -17,11 +17,18 @@ import {
   Copy,
   ExternalLink,
   RefreshCw,
+  Cloud,
+  Key,
+  User,
+  ShieldCheck,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import { useNetX } from '../context/NetXContext';
 import { AppearanceMode } from '../types/netx';
 import { Button, StatusBadge, ToggleSwitch } from '../components/ui/Primitives';
 import { checkOllamaConnection, RECOMMENDED_MODELS } from '../services/ollamaClient';
+import { testGeminiApiKey } from '../services/geminiClient';
 
 type SettingsTab =
   | 'appearance'
@@ -46,10 +53,13 @@ export const SettingsView: React.FC = () => {
   const [activeCategory, setActiveCategory] = useState<SettingsTab>('appearance');
   const [testingOllama, setTestingOllama] = useState(false);
   const [ollamaTestResult, setOllamaTestResult] = useState<{ online: boolean; version?: string; models: any[]; message?: string } | null>(null);
+  const [testingGemini, setTestingGemini] = useState(false);
+  const [geminiTestResult, setGeminiTestResult] = useState<{ ok: boolean; message?: string } | null>(null);
+  const [showApiKey, setShowApiKey] = useState(false);
 
   const categories: { id: SettingsTab; label: string; icon: React.ReactNode }[] = [
     { id: 'appearance', label: 'Appearance', icon: <Palette size={16} /> },
-    { id: 'ai', label: 'AI & Ollama', icon: <Sparkles size={16} /> },
+    { id: 'ai', label: 'AI Assistant', icon: <Sparkles size={16} /> },
     { id: 'startup', label: 'Startup', icon: <Power size={16} /> },
     { id: 'notifications', label: 'Notifications', icon: <Bell size={16} /> },
     { id: 'monitoring', label: 'Monitoring', icon: <Activity size={16} /> },
@@ -208,151 +218,51 @@ export const SettingsView: React.FC = () => {
           )}
 
           {activeCategory === 'ai' && (
-            <section aria-label="Local AI and Ollama settings">
+            <section aria-label="NetX AI Assistant settings">
               <div className="surface-panel-header">
                 <div>
-                  <h2 className="surface-panel-title">AI &amp; Local LLM Engine (Ollama)</h2>
+                  <h2 className="surface-panel-title">AI Assistant &amp; Intelligence</h2>
                   <p className="surface-panel-subtitle">
-                    Configure your on-device neural network assistant. NetX AI operates 100% locally via Ollama with zero cloud API keys or external telemetry.
+                    Configure your conversational network copilot. Support for 100% free Google Gemini Cloud AI (instant, 0% RAM), Local Ollama, or Offline Native diagnostics.
                   </p>
                 </div>
                 <StatusBadge
-                  variant={ollamaTestResult?.online ? 'success' : 'info'}
-                  label={ollamaTestResult?.online ? 'Ollama Online' : 'Local Ollama Engine'}
+                  variant={
+                    settings.aiProvider === 'gemini'
+                      ? settings.geminiApiKey ? 'success' : 'warning'
+                      : settings.aiProvider === 'ollama'
+                      ? (ollamaTestResult?.online ? 'success' : 'info')
+                      : 'info'
+                  }
+                  label={
+                    settings.aiProvider === 'gemini'
+                      ? (settings.geminiApiKey ? 'Gemini 1.5 Flash (Cloud)' : 'Gemini Key Needed')
+                      : settings.aiProvider === 'ollama'
+                      ? (ollamaTestResult?.online ? 'Ollama Online' : 'Local Ollama')
+                      : 'Offline Native'
+                  }
                 />
               </div>
 
               <div className="kv-list" style={{ marginTop: 14 }}>
-                {/* 1. AI Provider Selection */}
+                {/* 1. Personalized User Identity */}
                 <div className="kv-row">
                   <div>
-                    <div style={{ fontWeight: 600 }}>AI Provider</div>
-                    <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                      Select the neural execution runtime for NetX Assistant.
+                    <div style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <User size={15} style={{ color: 'var(--brand-mint)' }} />
+                      <span>User Display Name</span>
                     </div>
-                  </div>
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <button
-                      className="btn-secondary"
-                      style={{
-                        background: 'var(--bg-surface-tinted)',
-                        borderColor: 'var(--brand-mint)',
-                        fontWeight: 650,
-                      }}
-                    >
-                      Local Ollama (Active)
-                    </button>
-                    <button
-                      className="btn-secondary"
-                      disabled
-                      title="Cloud AI is disabled to guarantee zero data leakage."
-                      style={{ opacity: 0.5, cursor: 'not-allowed' }}
-                    >
-                      Cloud AI (Disabled)
-                    </button>
-                  </div>
-                </div>
-
-                {/* 2. Ollama Server Host URL */}
-                <div className="kv-row">
-                  <div>
-                    <div style={{ fontWeight: 600 }}>Ollama Server URL</div>
                     <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                      Local REST API endpoint (typically http://127.0.0.1:11434).
+                      Used by NetX AI when greeting you (e.g. "Hey {settings.customUserName || 'Kurui'}!").
                     </div>
                   </div>
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                     <input
                       type="text"
                       className="text-input"
-                      value={settings.ollamaUrl}
-                      onChange={(e) => updateSettings({ ollamaUrl: e.target.value })}
-                      style={{
-                        padding: '6px 10px',
-                        fontSize: 13,
-                        width: 220,
-                        background: 'var(--bg-surface-subtle)',
-                        border: '1px solid var(--border-subtle)',
-                        borderRadius: 'var(--radius-sm)',
-                        color: 'var(--text-primary)',
-                      }}
-                    />
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      icon={<RefreshCw size={13} className={testingOllama ? 'spin' : ''} />}
-                      disabled={testingOllama}
-                      onClick={async () => {
-                        setTestingOllama(true);
-                        try {
-                          const res = await checkOllamaConnection(settings.ollamaUrl);
-                          setOllamaTestResult(res);
-                          if (res.online) {
-                            pushToast(`Connected to Ollama ${res.version || ''} (${res.models.length} model(s) found).`, 'success');
-                          } else {
-                            pushToast(`Ollama connection failed: ${res.error || 'Server offline'}`, 'warning');
-                          }
-                        } finally {
-                          setTestingOllama(false);
-                        }
-                      }}
-                    >
-                      Test Connection
-                    </Button>
-                  </div>
-                </div>
-
-                {/* Connection Status Details */}
-                {ollamaTestResult && (
-                  <div
-                    style={{
-                      padding: '10px 14px',
-                      borderRadius: 'var(--radius-md)',
-                      background: ollamaTestResult.online
-                        ? 'rgba(16, 185, 129, 0.1)'
-                        : 'rgba(239, 68, 68, 0.1)',
-                      border: `1px solid ${
-                        ollamaTestResult.online ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'
-                      }`,
-                      fontSize: 13,
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 8,
-                    }}
-                  >
-                    {ollamaTestResult.online ? (
-                      <>
-                        <CheckCircle2 size={16} color="#10b981" />
-                        <span>
-                          <strong>Connected to Ollama {ollamaTestResult.version}</strong> — {ollamaTestResult.models.length} local model(s) detected.
-                        </span>
-                      </>
-                    ) : (
-                      <>
-                        <AlertTriangle size={16} color="#ef4444" />
-                        <span>
-                          <strong>Offline:</strong> {ollamaTestResult.message || 'Ollama is not running on ' + settings.ollamaUrl}. Make sure the Ollama desktop service is started.
-                        </span>
-                      </>
-                    )}
-                  </div>
-                )}
-
-                {/* 3. Model Selector */}
-                <div className="kv-row">
-                  <div>
-                    <div style={{ fontWeight: 600 }}>Active Model Tag</div>
-                    <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                      Local model used for tool calling and reasoning.
-                    </div>
-                  </div>
-                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                    <input
-                      type="text"
-                      className="text-input"
-                      value={settings.ollamaModel}
-                      placeholder="e.g. llama3.2, mistral"
-                      onChange={(e) => updateSettings({ ollamaModel: e.target.value })}
+                      value={settings.customUserName || ''}
+                      placeholder="e.g. Kurui"
+                      onChange={(e) => updateSettings({ customUserName: e.target.value })}
                       style={{
                         padding: '6px 10px',
                         fontSize: 13,
@@ -363,10 +273,221 @@ export const SettingsView: React.FC = () => {
                         color: 'var(--text-primary)',
                       }}
                     />
-                    {ollamaTestResult?.models && ollamaTestResult.models.length > 0 && (
+                  </div>
+                </div>
+
+                {/* 2. AI Provider Selection */}
+                <div className="kv-row" style={{ alignItems: 'flex-start' }}>
+                  <div>
+                    <div style={{ fontWeight: 600 }}>AI Engine Provider</div>
+                    <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                      Choose your intelligence runtime.
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'flex-end' }}>
+                    <button
+                      className="btn-secondary"
+                      onClick={() => updateSettings({ aiProvider: 'gemini' })}
+                      style={{
+                        background: settings.aiProvider === 'gemini' ? 'var(--bg-surface-tinted)' : 'transparent',
+                        borderColor: settings.aiProvider === 'gemini' ? 'var(--brand-mint)' : 'var(--border-subtle)',
+                        fontWeight: settings.aiProvider === 'gemini' ? 650 : 500,
+                        color: settings.aiProvider === 'gemini' ? 'var(--brand-mint)' : 'var(--text-secondary)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 6,
+                      }}
+                    >
+                      <Sparkles size={14} />
+                      <span>Google Gemini (Free Cloud)</span>
+                    </button>
+
+                    <button
+                      className="btn-secondary"
+                      onClick={() => updateSettings({ aiProvider: 'ollama' })}
+                      style={{
+                        background: settings.aiProvider === 'ollama' ? 'var(--bg-surface-tinted)' : 'transparent',
+                        borderColor: settings.aiProvider === 'ollama' ? 'var(--brand-mint)' : 'var(--border-subtle)',
+                        fontWeight: settings.aiProvider === 'ollama' ? 650 : 500,
+                        color: settings.aiProvider === 'ollama' ? 'var(--brand-mint)' : 'var(--text-secondary)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 6,
+                      }}
+                    >
+                      <Cpu size={14} />
+                      <span>Local Ollama (Private)</span>
+                    </button>
+
+                    <button
+                      className="btn-secondary"
+                      onClick={() => updateSettings({ aiProvider: 'offline' })}
+                      style={{
+                        background: settings.aiProvider === 'offline' ? 'var(--bg-surface-tinted)' : 'transparent',
+                        borderColor: settings.aiProvider === 'offline' ? 'var(--brand-mint)' : 'var(--border-subtle)',
+                        fontWeight: settings.aiProvider === 'offline' ? 650 : 500,
+                        color: settings.aiProvider === 'offline' ? 'var(--brand-mint)' : 'var(--text-secondary)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 6,
+                      }}
+                    >
+                      <ShieldCheck size={14} />
+                      <span>Offline Native Engine</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* --- GOOGLE GEMINI SETTINGS --- */}
+                {settings.aiProvider === 'gemini' && (
+                  <div
+                    style={{
+                      background: 'rgba(124, 58, 237, 0.05)',
+                      border: '1px solid rgba(124, 58, 237, 0.25)',
+                      borderRadius: 'var(--radius-md)',
+                      padding: 14,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 12,
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 650, fontSize: 13.5 }}>
+                        <Cloud size={16} color="var(--brand-mint)" />
+                        <span>Google Gemini Free Cloud Configuration</span>
+                      </div>
+                      <a
+                        href="https://aistudio.google.com/app/apikey"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="btn-secondary"
+                        style={{
+                          fontSize: 12,
+                          padding: '4px 8px',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 5,
+                          textDecoration: 'none',
+                        }}
+                      >
+                        <ExternalLink size={12} />
+                        Get Free Key (Google AI Studio)
+                      </a>
+                    </div>
+
+                    <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0, lineHeight: 1.45 }}>
+                      Google Gemini 1.5 Flash provides free, lightning-fast ChatGPT-like intelligence. It operates with zero local RAM footprint on your computer and can control Wi-Fi, speed testing, and network diagnostics natively.
+                    </p>
+
+                    {/* Gemini API Key */}
+                    <div className="kv-row" style={{ padding: 0, border: 'none' }}>
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: 13 }}>Google Gemini API Key</div>
+                        <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
+                          Stored locally in your secure NetX configuration.
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                        <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                          <input
+                            type={showApiKey ? 'text' : 'password'}
+                            className="text-input"
+                            value={settings.geminiApiKey || ''}
+                            placeholder="AIzaSy..."
+                            onChange={(e) => updateSettings({ geminiApiKey: e.target.value })}
+                            style={{
+                              padding: '6px 32px 6px 10px',
+                              fontSize: 13,
+                              width: 240,
+                              background: 'var(--bg-surface-subtle)',
+                              border: '1px solid var(--border-subtle)',
+                              borderRadius: 'var(--radius-sm)',
+                              color: 'var(--text-primary)',
+                            }}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowApiKey(!showApiKey)}
+                            style={{
+                              position: 'absolute',
+                              right: 6,
+                              background: 'transparent',
+                              border: 'none',
+                              color: 'var(--text-muted)',
+                              cursor: 'pointer',
+                              padding: 2,
+                            }}
+                          >
+                            {showApiKey ? <EyeOff size={14} /> : <Eye size={14} />}
+                          </button>
+                        </div>
+
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          disabled={testingGemini || !settings.geminiApiKey}
+                          onClick={async () => {
+                            setTestingGemini(true);
+                            setGeminiTestResult(null);
+                            try {
+                              const res = await testGeminiApiKey(settings.geminiApiKey);
+                              if (res.ok) {
+                                setGeminiTestResult({ ok: true, message: 'Gemini API key is active and working!' });
+                                pushToast('Gemini API key verified successfully!', 'success');
+                              } else {
+                                setGeminiTestResult({ ok: false, message: res.error || 'Connection failed' });
+                                pushToast(`Verification failed: ${res.error}`, 'warning');
+                              }
+                            } finally {
+                              setTestingGemini(false);
+                            }
+                          }}
+                        >
+                          <RefreshCw size={13} className={testingGemini ? 'spin' : ''} />
+                          <span>{testingGemini ? 'Testing...' : 'Test Key'}</span>
+                        </Button>
+                      </div>
+                    </div>
+
+                    {/* Gemini Verification Banner */}
+                    {geminiTestResult && (
+                      <div
+                        style={{
+                          padding: '8px 12px',
+                          borderRadius: 'var(--radius-sm)',
+                          background: geminiTestResult.ok ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)',
+                          border: `1px solid ${geminiTestResult.ok ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
+                          fontSize: 12.5,
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 8,
+                        }}
+                      >
+                        {geminiTestResult.ok ? (
+                          <>
+                            <CheckCircle2 size={15} color="#10b981" />
+                            <span style={{ color: '#10b981', fontWeight: 600 }}>{geminiTestResult.message}</span>
+                          </>
+                        ) : (
+                          <>
+                            <AlertTriangle size={15} color="#ef4444" />
+                            <span style={{ color: '#ef4444' }}>{geminiTestResult.message}</span>
+                          </>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Gemini Model */}
+                    <div className="kv-row" style={{ padding: 0, border: 'none' }}>
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: 13 }}>Cloud Model</div>
+                        <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
+                          Gemini 1.5 Flash recommended for fastest tool call latency.
+                        </div>
+                      </div>
                       <select
-                        value={settings.ollamaModel}
-                        onChange={(e) => updateSettings({ ollamaModel: e.target.value })}
+                        value={settings.geminiModel || 'gemini-1.5-flash'}
+                        onChange={(e) => updateSettings({ geminiModel: e.target.value })}
                         style={{
                           padding: '6px 10px',
                           fontSize: 13,
@@ -374,19 +495,220 @@ export const SettingsView: React.FC = () => {
                           border: '1px solid var(--border-subtle)',
                           borderRadius: 'var(--radius-sm)',
                           color: 'var(--text-primary)',
+                          width: 200,
                         }}
                       >
-                        {ollamaTestResult.models.map((m: any) => (
-                          <option key={m.name} value={m.name}>
-                            {m.name}
-                          </option>
-                        ))}
+                        <option value="gemini-1.5-flash">gemini-1.5-flash (Recommended)</option>
+                        <option value="gemini-2.0-flash">gemini-2.0-flash (Fast)</option>
+                        <option value="gemini-1.5-pro">gemini-1.5-pro (High Reasoning)</option>
                       </select>
-                    )}
+                    </div>
                   </div>
-                </div>
+                )}
 
-                {/* 4. Safety & Action Confirmation */}
+                {/* --- LOCAL OLLAMA SETTINGS --- */}
+                {settings.aiProvider === 'ollama' && (
+                  <>
+                    <div className="kv-row">
+                      <div>
+                        <div style={{ fontWeight: 600 }}>Ollama Server URL</div>
+                        <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                          Local REST API endpoint (typically http://127.0.0.1:11434).
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                        <input
+                          type="text"
+                          className="text-input"
+                          value={settings.ollamaUrl}
+                          onChange={(e) => updateSettings({ ollamaUrl: e.target.value })}
+                          style={{
+                            padding: '6px 10px',
+                            fontSize: 13,
+                            width: 220,
+                            background: 'var(--bg-surface-subtle)',
+                            border: '1px solid var(--border-subtle)',
+                            borderRadius: 'var(--radius-sm)',
+                            color: 'var(--text-primary)',
+                          }}
+                        />
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          icon={<RefreshCw size={13} className={testingOllama ? 'spin' : ''} />}
+                          disabled={testingOllama}
+                          onClick={async () => {
+                            setTestingOllama(true);
+                            try {
+                              const res = await checkOllamaConnection(settings.ollamaUrl);
+                              setOllamaTestResult(res);
+                              if (res.online) {
+                                pushToast(`Connected to Ollama ${res.version || ''} (${res.models.length} model(s) found).`, 'success');
+                              } else {
+                                pushToast(`Ollama connection failed: ${res.error || 'Server offline'}`, 'warning');
+                              }
+                            } finally {
+                              setTestingOllama(false);
+                            }
+                          }}
+                        >
+                          Test Connection
+                        </Button>
+                      </div>
+                    </div>
+
+                    {/* Connection Status Details */}
+                    {ollamaTestResult && (
+                      <div
+                        style={{
+                          padding: '10px 14px',
+                          borderRadius: 'var(--radius-md)',
+                          background: ollamaTestResult.online
+                            ? 'rgba(16, 185, 129, 0.1)'
+                            : 'rgba(239, 68, 68, 0.1)',
+                          border: `1px solid ${
+                            ollamaTestResult.online ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'
+                          }`,
+                          fontSize: 13,
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 8,
+                        }}
+                      >
+                        {ollamaTestResult.online ? (
+                          <>
+                            <CheckCircle2 size={16} color="#10b981" />
+                            <span>
+                              <strong>Connected to Ollama {ollamaTestResult.version}</strong> — {ollamaTestResult.models.length} local model(s) detected.
+                            </span>
+                          </>
+                        ) : (
+                          <>
+                            <AlertTriangle size={16} color="#ef4444" />
+                            <span>
+                              <strong>Offline:</strong> {ollamaTestResult.message || 'Ollama is not running on ' + settings.ollamaUrl}. Make sure the Ollama desktop service is started.
+                            </span>
+                          </>
+                        )}
+                      </div>
+                    )}
+
+                    <div className="kv-row">
+                      <div>
+                        <div style={{ fontWeight: 600 }}>Active Model Tag</div>
+                        <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                          Local model used for tool calling and reasoning.
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                        <input
+                          type="text"
+                          className="text-input"
+                          value={settings.ollamaModel}
+                          placeholder="e.g. llama3.2, mistral"
+                          onChange={(e) => updateSettings({ ollamaModel: e.target.value })}
+                          style={{
+                            padding: '6px 10px',
+                            fontSize: 13,
+                            width: 180,
+                            background: 'var(--bg-surface-subtle)',
+                            border: '1px solid var(--border-subtle)',
+                            borderRadius: 'var(--radius-sm)',
+                            color: 'var(--text-primary)',
+                          }}
+                        />
+                        {ollamaTestResult?.models && ollamaTestResult.models.length > 0 && (
+                          <select
+                            value={settings.ollamaModel}
+                            onChange={(e) => updateSettings({ ollamaModel: e.target.value })}
+                            style={{
+                              padding: '6px 10px',
+                              fontSize: 13,
+                              background: 'var(--bg-surface-subtle)',
+                              border: '1px solid var(--border-subtle)',
+                              borderRadius: 'var(--radius-sm)',
+                              color: 'var(--text-primary)',
+                            }}
+                          >
+                            {ollamaTestResult.models.map((m: any) => (
+                              <option key={m.name} value={m.name}>
+                                {m.name}
+                              </option>
+                            ))}
+                          </select>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Recommended Models Guide */}
+                    <div style={{ marginTop: 12, padding: 14, background: 'var(--bg-surface-subtle)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)' }}>
+                      <div style={{ fontWeight: 650, fontSize: 13.5, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <Cpu size={15} style={{ color: 'var(--accent-purple)' }} />
+                        Recommended Local Models for NetX
+                      </div>
+                      <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 10 }}>
+                        Install any model using your terminal:
+                      </p>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10 }}>
+                        {RECOMMENDED_MODELS.map((m) => (
+                          <div
+                            key={m.tag}
+                            style={{
+                              padding: 10,
+                              background: 'var(--bg-surface-tinted)',
+                              borderRadius: 'var(--radius-sm)',
+                              border: '1px solid var(--border-subtle)',
+                            }}
+                          >
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <span style={{ fontWeight: 700, fontSize: 13 }}>{m.name}</span>
+                              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{m.vram}</span>
+                            </div>
+                            <div style={{ fontSize: 11.5, color: 'var(--text-secondary)', margin: '4px 0 6px 0' }}>{m.description}</div>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'var(--bg-surface-subtle)', padding: '4px 8px', borderRadius: 4 }}>
+                              <code style={{ fontSize: 11, color: 'var(--accent-purple)' }}>{m.command}</code>
+                              <button
+                                className="btn-icon"
+                                onClick={() => {
+                                  navigator.clipboard.writeText(m.command);
+                                  pushToast(`Copied "${m.command}"`, 'info');
+                                }}
+                                style={{ width: 22, height: 22, padding: 0 }}
+                              >
+                                <Copy size={11} />
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {/* --- OFFLINE NATIVE SETTINGS --- */}
+                {settings.aiProvider === 'offline' && (
+                  <div
+                    style={{
+                      background: 'rgba(16, 185, 129, 0.05)',
+                      border: '1px solid rgba(16, 185, 129, 0.25)',
+                      borderRadius: 'var(--radius-md)',
+                      padding: 14,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 8,
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 650, fontSize: 13.5 }}>
+                      <ShieldCheck size={16} color="#10b981" />
+                      <span>Offline Native Engine Active</span>
+                    </div>
+                    <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0, lineHeight: 1.5 }}>
+                      NetX Assistant will run in deterministic, offline-first mode using built-in intent parsing. You can say <em>"hey"</em>, ask to <em>"check wifi"</em>, <em>"connect to [wifi] with password [pwd]"</em>, <em>"speed test"</em>, <em>"ping 8.8.8.8"</em>, or <em>"diagnose network"</em> with zero cloud API keys or background services.
+                    </p>
+                  </div>
+                )}
+
+                {/* Common AI settings: Confirmation & Temperature */}
                 <div className="kv-row">
                   <div>
                     <div style={{ fontWeight: 600 }}>Require Confirmation for Disruptive Actions</div>
@@ -401,7 +723,6 @@ export const SettingsView: React.FC = () => {
                   />
                 </div>
 
-                {/* 5. Temperature Setting */}
                 <div className="kv-row">
                   <div>
                     <div style={{ fontWeight: 600 }}>Model Temperature ({settings.aiTemperature})</div>
@@ -418,49 +739,6 @@ export const SettingsView: React.FC = () => {
                     onChange={(e) => updateSettings({ aiTemperature: parseFloat(e.target.value) })}
                     style={{ width: 140 }}
                   />
-                </div>
-
-                {/* 6. Recommended Models Guide */}
-                <div style={{ marginTop: 12, padding: 14, background: 'var(--bg-surface-subtle)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)' }}>
-                  <div style={{ fontWeight: 650, fontSize: 13.5, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <Cpu size={15} style={{ color: 'var(--accent-purple)' }} />
-                    Recommended Local Models for NetX
-                  </div>
-                  <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 10 }}>
-                    Install any model using your terminal:
-                  </p>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10 }}>
-                    {RECOMMENDED_MODELS.map((m) => (
-                      <div
-                        key={m.tag}
-                        style={{
-                          padding: 10,
-                          background: 'var(--bg-surface-tinted)',
-                          borderRadius: 'var(--radius-sm)',
-                          border: '1px solid var(--border-subtle)',
-                        }}
-                      >
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <span style={{ fontWeight: 700, fontSize: 13 }}>{m.name}</span>
-                          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{m.vram}</span>
-                        </div>
-                        <div style={{ fontSize: 11.5, color: 'var(--text-secondary)', margin: '4px 0 6px 0' }}>{m.description}</div>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'var(--bg-surface-subtle)', padding: '4px 8px', borderRadius: 4 }}>
-                          <code style={{ fontSize: 11, color: 'var(--accent-purple)' }}>{m.command}</code>
-                          <button
-                            className="btn-icon"
-                            onClick={() => {
-                              navigator.clipboard.writeText(m.command);
-                              pushToast(`Copied "${m.command}"`, 'info');
-                            }}
-                            style={{ width: 22, height: 22, padding: 0 }}
-                          >
-                            <Copy size={11} />
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
                 </div>
               </div>
             </section>

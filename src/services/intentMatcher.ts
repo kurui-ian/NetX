@@ -1,7 +1,7 @@
 /**
- * NetX Native Intent Matcher
- * Parses natural language commands into verified NetX tool calls.
- * Used for instant command dispatch and offline fallback when Ollama is not running.
+ * NetX Native Intent Matcher & Conversational Classifier
+ * Parses natural language commands into verified NetX tool calls and friendly conversation.
+ * Used for instant command dispatch and offline fallback when online AI is disconnected.
  */
 
 export interface MatchedIntent {
@@ -10,6 +10,78 @@ export interface MatchedIntent {
   args: Record<string, any>;
   title: string;
   userQuery: string;
+}
+
+export interface ConversationalIntent {
+  type: 'greeting' | 'identity' | 'status' | 'thanks' | 'help';
+  replyText: string;
+  suggestedActions?: Array<{ label: string; query: string }>;
+}
+
+export function matchConversationalIntent(query: string, userName: string = 'Kurui'): ConversationalIntent | null {
+  const clean = query.trim().toLowerCase();
+
+  // 1. Greetings ("hey", "hello", "hi", "good morning", "yo")
+  if (/^(?:hey|hello|hi|hiya|howdy|sup|yo|good\s+(?:morning|afternoon|evening|day)|greetings)\b/i.test(clean) && clean.length < 35) {
+    return {
+      type: 'greeting',
+      replyText: `Hey **${userName}**! 👋 Great to see you. How can I assist with your connection today?`,
+      suggestedActions: [
+        { label: '📶 Scan Wi-Fi Networks', query: 'Check for available Wi-Fi' },
+        { label: '⚡ Run Speed Test', query: 'Run an internet speed test' },
+        { label: '🩺 Diagnose Connection', query: 'Why is my internet slow? Diagnose my connection' },
+      ],
+    };
+  }
+
+  // 2. Identity ("who are you", "what are you", "what can you do")
+  if (/(?:who\s+are\s+you|what\s+are\s+you|what\s+can\s+you\s+do|introduce\s+yourself)/i.test(clean)) {
+    return {
+      type: 'identity',
+      replyText: `I am **NetX AI**, your personal desktop network intelligence assistant, **${userName}**!
+
+I can help you:
+* 📶 **Scan available Wi-Fi networks** and connect to them
+* ⚡ **Benchmark download, upload, and ping** on Cloudflare Edge
+* 🩺 **Diagnose connectivity faults** across your adapter, gateway, and DNS
+* 📡 **Ping hosts & test jitter** for gaming stability
+* 🗺️ **Trace route hops** and inspect active socket processes
+* 🧹 **Perform safe network repairs** like flushing DNS or renewing DHCP
+
+What would you like to check right now?`,
+      suggestedActions: [
+        { label: '📶 Scan Available Wi-Fi', query: 'Check for available Wi-Fi' },
+        { label: '⚡ Speed Test', query: 'Run an internet speed test' },
+        { label: '📊 Network Summary', query: 'Summarize my network performance' },
+      ],
+    };
+  }
+
+  // 3. Thanks / Polite ("thank you", "thanks", "thx", "awesome", "great")
+  if (/^(?:thanks|thank\s*you|thx|awesome|great|perfect|appreciate\s*it|good\s*job)\b/i.test(clean) && clean.length < 35) {
+    return {
+      type: 'thanks',
+      replyText: `You're very welcome, **${userName}**! 😊 Let me know anytime you need another speed check, diagnostic test, or Wi-Fi scan.`,
+      suggestedActions: [
+        { label: '📶 Scan Wi-Fi', query: 'Check for available Wi-Fi' },
+        { label: '⚡ Speed Benchmark', query: 'Run an internet speed test' },
+      ],
+    };
+  }
+
+  // 4. Status inquiry ("how are you", "how's it going", "status check")
+  if (/(?:how\s+are\s+you|how\s+is\s+it\s+going|hows\s+it\s+going|are\s+you\s+ready)/i.test(clean)) {
+    return {
+      type: 'status',
+      replyText: `All systems are operating smoothly, **${userName}**! My network telemetry counters and ping probes are live and ready to assist you.`,
+      suggestedActions: [
+        { label: '📊 View Telemetry', query: 'Summarize my network performance' },
+        { label: '🩺 Run Diagnostics', query: 'Diagnose my connection' },
+      ],
+    };
+  }
+
+  return null;
 }
 
 export function matchUserIntent(query: string): MatchedIntent | null {
@@ -111,11 +183,27 @@ export function matchUserIntent(query: string): MatchedIntent | null {
     };
   }
 
-  // 7. Connect Wi-Fi
-  const wifiConnMatch = clean.match(/\b(?:connect\s*(?:me)?\s*(?:to)?)\s*(?:wifi|network)?\s*["']?([a-zA-Z0-9_ -]+)["']?/i);
+  // 7. Connect Wi-Fi (With explicit password parsing)
+  const wifiPassMatch = query.match(/\bconnect(?:\s+me)?(?:\s+to)?(?:\s+wifi)?\s+["']?([^"'\n]+?)["']?\s+(?:with\s+)?(?:password|pass|key)\s+["']?([^"'\s]+)["']?/i);
+  if (wifiPassMatch) {
+    const rawSsid = wifiPassMatch[1].trim();
+    const rawPass = wifiPassMatch[2].trim();
+    if (rawSsid && !['wifi', 'internet', 'network'].includes(rawSsid.toLowerCase())) {
+      return {
+        matched: true,
+        toolName: 'connect_wifi',
+        args: { ssid: rawSsid, password: rawPass },
+        title: `Connecting to Wi-Fi "${rawSsid}"`,
+        userQuery: query,
+      };
+    }
+  }
+
+  // Connect Wi-Fi (SSID only)
+  const wifiConnMatch = query.match(/\bconnect(?:\s+me)?(?:\s+to)?(?:\s+wifi|\s+network)?\s+["']?([a-zA-Z0-9_ -]+)["']?/i);
   if (wifiConnMatch && !clean.includes('disconnect') && !clean.includes('tools')) {
     const rawSsid = wifiConnMatch[1].trim();
-    if (rawSsid && rawSsid !== 'wifi' && rawSsid !== 'internet' && rawSsid !== 'network') {
+    if (rawSsid && !['wifi', 'internet', 'network'].includes(rawSsid.toLowerCase())) {
       return {
         matched: true,
         toolName: 'connect_wifi',
@@ -128,11 +216,13 @@ export function matchUserIntent(query: string): MatchedIntent | null {
 
   // 8. Wi-Fi Scan / Available Networks
   if (
-    /(?:show|scan|list|find|available|nearby|search)\s+(?:all\s*)?wi-?fi(?:\s*networks)?/i.test(clean) ||
+    /(?:show|scan|list|find|available|nearby|search|check|look\s*for)\s+(?:for\s+)?(?:all\s*)?(?:available\s*)?wi-?fi(?:\s*networks)?/i.test(clean) ||
     clean === 'wifi' ||
     clean === 'scan wifi' ||
     clean === 'available wifi' ||
-    clean === 'show wifi'
+    clean === 'show wifi' ||
+    clean === 'check wifi' ||
+    clean === 'check for available wifi'
   ) {
     return {
       matched: true,

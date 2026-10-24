@@ -180,12 +180,15 @@ export interface NetXSettings {
   monthlyCapGb: number;
   preferredInterface: string;
   telemetryLocalOnly: boolean;
-  // NetX AI & Ollama Configuration
-  aiProvider: 'ollama' | 'cloud-future';
+  // NetX AI Configuration
+  aiProvider: 'gemini' | 'ollama' | 'offline';
+  geminiApiKey: string;
+  geminiModel: string;
   ollamaUrl: string;
   ollamaModel: string;
   aiTemperature: number;
   aiConfirmActions: boolean;
+  customUserName: string;
 }
 
 export interface ToastMessage {
@@ -218,6 +221,8 @@ declare global {
       connectWifi: (ssid: string, password?: string) => Promise<{ ok: boolean; connected: boolean; ssid: string; output?: string; interfaceInfo?: any; error?: string }>;
       getOllamaStatus: (url?: string) => Promise<{ ok: boolean; online: boolean; version?: string; url?: string; models: OllamaModelInfo[]; error?: string }>;
       chatOllama: (payload: { url?: string; model: string; messages: any[]; tools?: any[]; options?: any }) => Promise<{ ok: boolean; message?: any; done?: boolean; totalDuration?: number; evalCount?: number; error?: string }>;
+      chatGemini: (payload: { apiKey: string; model?: string; payload: any }) => Promise<{ ok: boolean; data?: any; error?: string }>;
+      getSystemUser: () => Promise<{ username: string; hostname: string }>;
       quitApp: () => Promise<any>;
     };
   }

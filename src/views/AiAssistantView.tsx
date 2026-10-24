@@ -16,6 +16,7 @@ import {
   Gauge,
   HelpCircle,
   Info,
+  Key,
   Lock,
   Network,
   Radio,
@@ -45,11 +46,16 @@ import {
   NETX_AI_SYSTEM_PROMPT,
 } from '../services/ollamaClient';
 import {
+  sendGeminiChat,
+  GeminiChatTurn,
+  testGeminiApiKey,
+} from '../services/geminiClient';
+import {
   NETX_AI_TOOLS,
   findToolByName,
   ToolDefinition,
 } from '../services/aiToolRegistry';
-import { matchUserIntent } from '../services/intentMatcher';
+import { matchUserIntent, matchConversationalIntent } from '../services/intentMatcher';
 import {
   analyzeDiagnosticResults,
   DiagnosticAnalysis,
@@ -74,8 +80,9 @@ interface UIMessage {
     submitted?: boolean;
   };
   suggestedActions?: Array<{
-    toolName: string;
+    toolName?: string;
     label: string;
+    query?: string;
     args?: any;
     description?: string;
   }>;
@@ -83,10 +90,10 @@ interface UIMessage {
 }
 
 const QUICK_PROMPTS = [
+  { label: '📶 Available Wi-Fi', query: 'Check for available Wi-Fi' },
   { label: '⚡ Speed Test', query: 'Run an internet speed test' },
   { label: '🩺 Diagnose Network', query: 'Why is my internet slow? Diagnose my connection' },
   { label: '🌐 Check DNS', query: 'Check if my DNS is working for cloudflare.com' },
-  { label: '📶 Available Wi-Fi', query: 'Show all available Wi-Fi networks' },
   { label: '🖥️ Scan LAN Devices', query: 'Find devices on my local network' },
   { label: '🧹 Flush DNS Cache', query: 'Flush my DNS resolver cache' },
   { label: '📊 Network Summary', query: 'Summarize my network performance and data usage' },
@@ -110,22 +117,39 @@ export const AiAssistantView: React.FC = () => {
     setActiveNav,
   } = useNetX();
 
+  const [userName, setUserName] = useState<string>(settings.customUserName || 'Kurui');
+
+  // Load OS username dynamically if available
+  useEffect(() => {
+    if (window.netxNative?.getSystemUser) {
+      window.netxNative
+        .getSystemUser()
+        .then((user) => {
+          if (user?.username && !settings.customUserName) {
+            setUserName(user.username);
+          }
+        })
+        .catch(() => {});
+    }
+  }, [settings.customUserName]);
+
   const [messages, setMessages] = useState<UIMessage[]>(() => {
     try {
-      const stored = localStorage.getItem('netx-ai-messages-v1');
+      const stored = localStorage.getItem('netx-ai-messages-v2');
       if (stored) {
         return JSON.parse(stored);
       }
     } catch {}
+    const initialName = settings.customUserName || 'Kurui';
     return [
       {
         id: 'msg-welcome',
         role: 'assistant',
-        content: `👋 Hello! I am **NetX AI**, your private local network operations assistant.
+        content: `👋 Hello, **${initialName}**! I am **NetX AI**, your personal network intelligence assistant.
 
-I can run real speed tests, diagnose connectivity problems, trace network routes, inspect active connections, scan Wi-Fi, and perform safe network repairs.
+I can test your connection speed, scan nearby Wi-Fi networks and help you connect, run diagnostic checks, ping hosts, and troubleshoot your network in real-time.
 
-I run locally via **Ollama** on your PC—no cloud API keys or telemetry required. How can I help you today?`,
+How can I help you today? Feel free to ask anything or tap one of the quick suggestions below!`,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       },
     ];
@@ -153,7 +177,7 @@ I run locally via **Ollama** on your PC—no cloud API keys or telemetry require
   // Save messages to local storage
   useEffect(() => {
     try {
-      localStorage.setItem('netx-ai-messages-v1', JSON.stringify(messages.slice(-30)));
+      localStorage.setItem('netx-ai-messages-v2', JSON.stringify(messages.slice(-30)));
     } catch {}
   }, [messages]);
 
@@ -170,7 +194,6 @@ I run locally via **Ollama** on your PC—no cloud API keys or telemetry require
     try {
       const res = await checkOllamaConnection(settings.ollamaUrl);
       setOllamaStatus(res);
-      // Auto-select first available model if current setting isn't installed
       if (res.online && res.models.length > 0) {
         const hasCurrent = res.models.some(
           (m) => m.name === settings.ollamaModel || m.model === settings.ollamaModel
@@ -215,6 +238,12 @@ I run locally via **Ollama** on your PC—no cloud API keys or telemetry require
             status: 'complete',
           });
         }
+      } else if (toolDef.name === 'list_wifi_networks') {
+        setRunningActionStatus('Scanning 2.4 GHz & 5 GHz wireless spectrum...');
+        result = await toolDef.execute(cleanArgs);
+      } else if (toolDef.name === 'connect_wifi') {
+        setRunningActionStatus(`Connecting to Wi-Fi "${cleanArgs.ssid}"...`);
+        result = await toolDef.execute(cleanArgs);
       } else {
         result = await toolDef.execute(cleanArgs);
       }
@@ -240,7 +269,14 @@ I run locally via **Ollama** on your PC—no cloud API keys or telemetry require
                 analysis,
               },
               suggestedActions: analysis?.suggestedAction
-                ? [analysis.suggestedAction]
+                ? [
+                    {
+                      toolName: analysis.suggestedAction.toolName,
+                      label: analysis.suggestedAction.label,
+                      query: `Run ${analysis.suggestedAction.label}`,
+                      description: analysis.suggestedAction.description,
+                    },
+                  ]
                 : undefined,
             };
           }
@@ -301,15 +337,155 @@ I run locally via **Ollama** on your PC—no cloud API keys or telemetry require
 
     setMessages((prev) => [...prev, userMsg]);
     setIsProcessing(true);
+    setRunningActionStatus('NetX AI is thinking...');
 
-    // ------------------------------------------------------------------------
-    // PATH A: Ollama Local AI Online
-    // ------------------------------------------------------------------------
-    if (ollamaStatus.online && settings.ollamaModel) {
+    // ========================================================================
+    // PATH 1: Google Gemini Free Cloud AI (Recommended)
+    // ========================================================================
+    if (settings.aiProvider === 'gemini' && settings.geminiApiKey?.trim()) {
+      try {
+        setRunningActionStatus('Thinking with Google Gemini...');
+
+        // Build conversation history for Gemini
+        const geminiHistory: GeminiChatTurn[] = messages
+          .filter((m) => m.role === 'user' || m.role === 'assistant')
+          .slice(-8)
+          .map((m) => ({
+            role: (m.role === 'user' ? 'user' : 'model') as 'user' | 'model',
+            parts: [{ text: m.content }],
+          }));
+
+        geminiHistory.push({
+          role: 'user',
+          parts: [{ text: query }],
+        });
+
+        const geminiRes = await sendGeminiChat(
+          settings.geminiApiKey,
+          settings.geminiModel || 'gemini-1.5-flash',
+          geminiHistory,
+          settings.aiTemperature
+        );
+
+        if (!geminiRes.ok) {
+          throw new Error(geminiRes.error || 'Failed to receive reply from Gemini');
+        }
+
+        // If Gemini called a network tool
+        if (geminiRes.toolCall) {
+          const toolName = geminiRes.toolCall.name;
+          const toolArgs = geminiRes.toolCall.args;
+          const toolDef = findToolByName(toolName);
+
+          if (toolDef) {
+            const validation = toolDef.validateArgs(toolArgs);
+            const cleanArgs = validation.cleanArgs;
+
+            // Disruptive confirmation check
+            if (toolDef.requiresConfirmation && settings.aiConfirmActions) {
+              const confirmMsg: UIMessage = {
+                id: assistantMsgId,
+                role: 'assistant',
+                content: `I would like to run **${toolDef.displayName}**. Because this action could impact your network connection, please confirm below to proceed.`,
+                timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                toolExecution: {
+                  toolName: toolDef.name,
+                  displayName: toolDef.displayName,
+                  status: 'confirming',
+                  args: cleanArgs,
+                },
+              };
+              setMessages((prev) => [...prev, confirmMsg]);
+              setIsProcessing(false);
+              setRunningActionStatus(null);
+              return;
+            }
+
+            // Run tool immediately
+            const toolMsg: UIMessage = {
+              id: assistantMsgId,
+              role: 'assistant',
+              content: `Running **${toolDef.displayName}** to inspect live network conditions...`,
+              timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              toolExecution: {
+                toolName: toolDef.name,
+                displayName: toolDef.displayName,
+                status: 'running',
+                args: cleanArgs,
+              },
+            };
+            setMessages((prev) => [...prev, toolMsg]);
+
+            const toolResult = await executeToolSafely(toolDef, cleanArgs, assistantMsgId);
+
+            // Feed tool result back to Gemini for conversational synthesis
+            setRunningActionStatus('Synthesizing verified results...');
+            const followUpTurns: GeminiChatTurn[] = [
+              ...geminiHistory,
+              {
+                role: 'model',
+                parts: geminiRes.rawParts || [{ functionCall: { name: toolName, args: toolArgs } }],
+              },
+              {
+                role: 'function',
+                parts: [
+                  {
+                    functionResponse: {
+                      name: toolName,
+                      response: { output: toolResult },
+                    },
+                  },
+                ],
+              },
+            ];
+
+            const secondRes = await sendGeminiChat(
+              settings.geminiApiKey,
+              settings.geminiModel || 'gemini-1.5-flash',
+              followUpTurns,
+              settings.aiTemperature
+            );
+
+            if (secondRes.ok && secondRes.text) {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === assistantMsgId
+                    ? { ...m, content: secondRes.text! }
+                    : m
+                )
+              );
+            }
+            setIsProcessing(false);
+            setRunningActionStatus(null);
+            return;
+          }
+        }
+
+        // Direct conversational text answer
+        const directMsg: UIMessage = {
+          id: assistantMsgId,
+          role: 'assistant',
+          content: geminiRes.text || `Hello **${userName}**! How can I help you today?`,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        };
+        setMessages((prev) => [...prev, directMsg]);
+        setIsProcessing(false);
+        setRunningActionStatus(null);
+        return;
+      } catch (err: any) {
+        console.error('Gemini error, falling back:', err);
+        fallbackToNativeEngine(query, assistantMsgId, err?.message);
+        return;
+      }
+    }
+
+    // ========================================================================
+    // PATH 2: Local Ollama Neural Engine
+    // ========================================================================
+    if (settings.aiProvider === 'ollama' && ollamaStatus.online && settings.ollamaModel) {
       try {
         setRunningActionStatus(`Thinking with ${settings.ollamaModel}...`);
 
-        // Build conversation history for Ollama
         const historyForOllama: ChatMessage[] = [
           { role: 'system', content: NETX_AI_SYSTEM_PROMPT },
           ...messages
@@ -334,10 +510,7 @@ I run locally via **Ollama** on your PC—no cloud API keys or telemetry require
         }
 
         const asstMessage = chatRes.message;
-
-        // Check if Ollama requested a native tool call
         const nativeToolCall = asstMessage.tool_calls?.[0];
-        // Or check if model outputted fallback JSON
         const fallbackCall = extractFallbackJsonToolCall(asstMessage.content);
 
         const toolName = nativeToolCall?.function?.name || fallbackCall?.name;
@@ -349,7 +522,6 @@ I run locally via **Ollama** on your PC—no cloud API keys or telemetry require
             const validation = toolDef.validateArgs(toolArgs);
             const cleanArgs = validation.cleanArgs;
 
-            // Check if tool requires user confirmation
             if (toolDef.requiresConfirmation && settings.aiConfirmActions) {
               const confirmMsg: UIMessage = {
                 id: assistantMsgId,
@@ -372,7 +544,6 @@ I run locally via **Ollama** on your PC—no cloud API keys or telemetry require
               return;
             }
 
-            // Execute tool immediately if no confirmation needed
             const toolMsg: UIMessage = {
               id: assistantMsgId,
               role: 'assistant',
@@ -389,7 +560,6 @@ I run locally via **Ollama** on your PC—no cloud API keys or telemetry require
 
             const toolResult = await executeToolSafely(toolDef, cleanArgs, assistantMsgId);
 
-            // Return result to Ollama to generate final verified explanation
             setRunningActionStatus('Analyzing measured results with Ollama...');
             const followUpHistory: ChatMessage[] = [
               ...historyForOllama,
@@ -422,38 +592,60 @@ I run locally via **Ollama** on your PC—no cloud API keys or telemetry require
           }
         }
 
-        // Direct answer with no tool call
         const directMsg: UIMessage = {
           id: assistantMsgId,
           role: 'assistant',
-          content: asstMessage.content || 'I processed your query, but had no specific response.',
+          content: asstMessage.content || `Hello **${userName}**! How can I help you today?`,
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         };
         setMessages((prev) => [...prev, directMsg]);
-      } catch (err: any) {
-        console.error('Ollama chat error:', err);
-        // Fallback to Native Engine if Ollama errors mid-request
-        fallbackToNativeEngine(query, assistantMsgId, err?.message);
-      } finally {
         setIsProcessing(false);
         setRunningActionStatus(null);
+        return;
+      } catch (err: any) {
+        console.error('Ollama chat error:', err);
+        fallbackToNativeEngine(query, assistantMsgId, err?.message);
+        return;
       }
-      return;
     }
 
-    // ------------------------------------------------------------------------
-    // PATH B: Native NetX Network Engine Fallback (Ollama Offline)
-    // ------------------------------------------------------------------------
+    // ========================================================================
+    // PATH 3: Smart Conversational Offline Engine
+    // ========================================================================
     fallbackToNativeEngine(query, assistantMsgId);
   };
 
-  // Fallback handler for deterministic natural language matching
+  // Fallback handler for deterministic natural language matching and friendly small-talk
   const fallbackToNativeEngine = async (
     query: string,
     assistantMsgId: string,
-    ollamaError?: string
+    apiError?: string
   ) => {
     setIsProcessing(true);
+
+    // 1. Check friendly conversational intent ("hey", "hello", "who are you", "thanks")
+    const convIntent = matchConversationalIntent(query, userName);
+    if (convIntent) {
+      // Natural brief thinking interlude
+      await new Promise((r) => setTimeout(r, 380));
+      const convMsg: UIMessage = {
+        id: assistantMsgId,
+        role: 'assistant',
+        content: convIntent.replyText,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        suggestedActions: convIntent.suggestedActions?.map((a) => ({
+          label: a.label,
+          query: a.query,
+        })),
+        isNativeFallback: true,
+      };
+      setMessages((prev) => [...prev, convMsg]);
+      setIsProcessing(false);
+      setRunningActionStatus(null);
+      return;
+    }
+
+    // 2. Check network command intent
     const matched = matchUserIntent(query);
 
     if (matched) {
@@ -501,7 +693,6 @@ I run locally via **Ollama** on your PC—no cloud API keys or telemetry require
 
         try {
           const result = await executeToolSafely(toolDef, cleanArgs, assistantMsgId);
-          // Synthesize verified summary
           const summaryText = generateNativeSummaryText(toolDef.name, result, cleanArgs);
 
           setMessages((prev) =>
@@ -530,32 +721,27 @@ I run locally via **Ollama** on your PC—no cloud API keys or telemetry require
       }
     }
 
-    // No matching tool found while offline
+    // 3. Statement outside offline toolkit
+    await new Promise((r) => setTimeout(r, 380));
     const helpMsg: UIMessage = {
       id: assistantMsgId,
       role: 'assistant',
-      content: `### ℹ️ NetX Local AI Assistant
+      content: `Hey **${userName}**, I don't have an answer for that in my offline network toolkit! 
 
 ${
-  ollamaError
-    ? `> ⚠️ **Ollama Communication Error**: ${ollamaError}\n`
-    : `> 💡 **Ollama is currently offline** on \`${settings.ollamaUrl}\`. NetX executed in native deterministic mode.\n`
+  apiError
+    ? `> ⚠️ *Connection Notice: ${apiError}*\n`
+    : !settings.geminiApiKey
+    ? `> 💡 *To chat freely about anything (just like ChatGPT), you can add a **free Google Gemini API key** in Settings.* It uses 0% of your PC's RAM and replies in under a second!\n`
+    : ''
 }
-
-I didn't match a direct native command for *"${query}"*.
-
-**Available Native Network Actions:**
-* **"Run a speed test"** — Test download, upload, ping, and jitter against Cloudflare Edge
-* **"Why is my internet slow?"** — Run a 4-step diagnostic check
-* **"Ping [host]"** — e.g. \`ping 1.1.1.1\` or \`ping google.com\`
-* **"Check DNS for [domain]"** — e.g. \`check dns for cloudflare.com\`
-* **"Scan Wi-Fi"** — List nearby wireless networks and signal quality
-* **"Find devices on LAN"** — Sweep your local subnet for active IP/MAC addresses
-* **"Flush DNS cache"** — Clear local DNS cache with \`ipconfig /flushdns\`
-* **"Summarize network"** — View live throughput, adapter specs, and usage
-
-To enable full conversational AI reasoning and multi-turn open chat, launch **Ollama** with \`ollama run llama3.2\`.`,
+In the meantime, I can check your available Wi-Fi networks, run an internet speed test, ping any server, or diagnose your connection. Try one of the options below!`,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      suggestedActions: [
+        { label: '📶 Check Available Wi-Fi', query: 'Check for available Wi-Fi' },
+        { label: '⚡ Run Speed Test', query: 'Run an internet speed test' },
+        { label: '🩺 Diagnose Connection', query: 'Why is my internet slow? Diagnose my connection' },
+      ],
       isNativeFallback: true,
     };
     setMessages((prev) => [...prev, helpMsg]);
@@ -563,7 +749,7 @@ To enable full conversational AI reasoning and multi-turn open chat, launch **Ol
     setRunningActionStatus(null);
   };
 
-  // Helper to generate natural text summaries when Ollama is offline
+  // Helper to generate verified natural text summaries
   const generateNativeSummaryText = (toolName: string, result: any, args: any): string => {
     switch (toolName) {
       case 'run_speed_test':
@@ -576,7 +762,11 @@ To enable full conversational AI reasoning and multi-turn open chat, launch **Ol
 
       case 'diagnose_network':
         return `### 🩺 Diagnostic Findings Overview
-${result.overallPassed ? '🟢 **All 4 baseline tests passed.** Your local network and internet routing are functioning normally.' : '⚠️ **Diagnostic issues detected.** Review the breakdown below for root cause and repair recommendations.'}`;
+${
+  result.overallPassed
+    ? '🟢 **All 4 baseline tests passed.** Your local network and internet routing are functioning normally.'
+    : '⚠️ **Diagnostic issues detected.** Review the breakdown below for root cause and repair recommendations.'
+}`;
 
       case 'ping_host':
         if (result?.summary) {
@@ -593,8 +783,33 @@ ${result.overallPassed ? '🟢 **All 4 baseline tests passed.** Your local netwo
         }
         return `⚠️ No DNS records found for \`${args.domain}\`.`;
 
-      case 'list_wifi_networks':
-        return `📶 **Wi-Fi Spectrum Scan**: Found **${result?.networks?.length || 0}** nearby access points in range.`;
+      case 'list_wifi_networks': {
+        const nets = result?.networks || [];
+        if (nets.length === 0) {
+          return `📶 **Wi-Fi Spectrum Scan**: No wireless networks detected in range. Ensure your Wi-Fi adapter is enabled.`;
+        }
+        const lines = nets.slice(0, 8).map((n: any) => {
+          const statusIcon = n.connected ? '🟢 *(Connected)*' : '📶';
+          return `* ${statusIcon} **${n.ssid}** — **${n.signalQuality}%** (${n.signalDbm} dBm) · ${n.band} · ${n.security}`;
+        });
+        return `### 📶 Available Wi-Fi Networks Nearby (${nets.length} detected)
+
+${lines.join('\n')}
+
+💡 *To connect, simply tell me the Wi-Fi name and password (e.g. "Connect to ${nets[0]?.ssid || 'Home_5G'} with password yourkey") or click Connect below!*`;
+      }
+
+      case 'connect_wifi': {
+        if (result?.connected || result?.ok) {
+          return `✅ **Successfully Connected to "${args.ssid}"**!
+* **Network Status**: Associated & Online
+* **Signal Quality**: ${result.interfaceInfo?.signalQuality || 100}% (${result.interfaceInfo?.signalDbm || -45} dBm)
+* **Link Speed**: ${result.interfaceInfo?.linkSpeedMbps || 144} Mbps
+* **Assigned IP**: ${result.interfaceInfo?.ipv4 || networkInfo.ipv4 || 'Configured via DHCP'}`;
+        }
+        return `❌ **Unable to Connect to "${args.ssid}"**:
+${result?.error || 'Failed to authenticate. Please ensure the security key is correct and the network is within range.'}`;
+      }
 
       case 'discover_lan_devices':
         return `🖥️ **LAN Device Discovery**: Found **${result?.devices?.length || 0}** active device(s) on your local subnet (${networkInfo.ipv4 || '192.168.1.0/24'}).`;
@@ -623,213 +838,125 @@ ${result.overallPassed ? '🟢 **All 4 baseline tests passed.** Your local netwo
     }
   };
 
-  // Confirmation button handlers
-  const handleConfirmAction = async (messageId: string, toolName: string, args: any) => {
-    const toolDef = findToolByName(toolName);
-    if (!toolDef) return;
-
-    setMessages((prev) =>
-      prev.map((m) =>
-        m.id === messageId && m.toolExecution
-          ? { ...m, toolExecution: { ...m.toolExecution, status: 'running' } }
-          : m
-      )
-    );
-
-    try {
-      const result = await executeToolSafely(toolDef, args, messageId);
-      const summaryText = generateNativeSummaryText(toolName, result, args);
-
+  // Connect Wi-Fi trigger from card
+  const handleInitiateWifiConnect = (messageId: string, ssid: string, security: string) => {
+    const isOpen = security.toLowerCase().includes('open') || security.toLowerCase().includes('none');
+    if (isOpen) {
+      handleSendMessage(`Connect to ${ssid}`);
+    } else {
       setMessages((prev) =>
         prev.map((m) =>
           m.id === messageId
-            ? {
-                ...m,
-                content: `${m.content}\n\n✅ **Action Confirmed & Executed**:\n${summaryText}`,
-              }
+            ? { ...m, requiresPassword: { ssid, submitted: false } }
             : m
         )
       );
-      pushToast(`${toolDef.displayName} executed successfully`, 'success');
-    } catch (err: any) {
-      pushToast(`Failed to execute ${toolDef.displayName}: ${err?.message}`, 'warning');
     }
   };
 
-  const handleCancelAction = (messageId: string) => {
-    setMessages((prev) =>
-      prev.map((m) =>
-        m.id === messageId && m.toolExecution
-          ? {
-              ...m,
-              toolExecution: { ...m.toolExecution, status: 'cancelled' },
-              content: `${m.content}\n\n🛑 *Action was cancelled by user.*`,
-            }
-          : m
-      )
-    );
-  };
-
-  // Secure Wi-Fi Connect Handler
   const handleConnectWifiSubmit = async (messageId: string, ssid: string) => {
     const password = wifiPasswordInputs[ssid] || '';
-    setRunningActionStatus(`Connecting to Wi-Fi "${ssid}"...`);
-
-    try {
-      const res = await window.netxNative?.connectWifi?.(ssid, password);
-      const isConnected = Boolean(res?.connected);
-
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === messageId
-            ? {
-                ...m,
-                requiresPassword: { ssid, submitted: true },
-                content: isConnected
-                  ? `🎉 **Successfully connected to Wi-Fi "${ssid}"!** Link verified on \`${res?.interfaceInfo?.name || 'Wi-Fi'}\` (${res?.interfaceInfo?.signalQuality || 85}% signal).`
-                  : `⚠️ **Connection Attempt Failed**: ${res?.error || 'Unable to connect to ' + ssid + '. Please verify the password and router range.'}`,
-              }
-            : m
-        )
-      );
-
-      // Clean password from React state immediately
-      setWifiPasswordInputs((prev) => {
-        const next = { ...prev };
-        delete next[ssid];
-        return next;
-      });
-
-      if (isConnected) {
-        pushToast(`Connected to ${ssid}`, 'success');
-      } else {
-        pushToast(`Failed to connect to ${ssid}`, 'warning');
-      }
-    } catch (err: any) {
-      pushToast(`Wi-Fi error: ${err?.message}`, 'warning');
-    } finally {
-      setRunningActionStatus(null);
-    }
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.id === messageId && m.requiresPassword
+          ? { ...m, requiresPassword: { ...m.requiresPassword, submitted: true } }
+          : m
+      )
+    );
+    handleSendMessage(`Connect to ${ssid} with password ${password}`);
   };
 
-  const handleClearHistory = () => {
-    setMessages([
-      {
-        id: 'msg-welcome-new',
-        role: 'assistant',
-        content: `Conversation history cleared. How can I assist you with your network?`,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      },
-    ]);
-    pushToast('Conversation history reset', 'info');
+  const clearChatHistory = () => {
+    const initialName = settings.customUserName || userName || 'Kurui';
+    const fresh: UIMessage = {
+      id: `msg-${Date.now()}`,
+      role: 'assistant',
+      content: `Chat history cleared. Hello, **${initialName}**! How can I assist with your network today?`,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    };
+    setMessages([fresh]);
+    try {
+      localStorage.removeItem('netx-ai-messages-v2');
+    } catch {}
+    pushToast('Chat conversation cleared.', 'info');
   };
 
   return (
-    <div className="page-container ai-assistant-view" style={{ maxWidth: '1200px', margin: '0 auto', display: 'flex', flexDirection: 'column', height: 'calc(100vh - 120px)', minHeight: '600px' }}>
-      {/* 1. Header Bar: Provider, Model Selector & Ollama Status */}
-      <div className="surface-card" style={{ padding: '12px 20px', marginBottom: '14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <div style={{ width: '36px', height: '36px', borderRadius: '10px', background: 'linear-gradient(135deg, #7c3aed, #4f46e5)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', boxShadow: '0 4px 12px rgba(124, 58, 237, 0.3)' }}>
-            <Sparkles size={20} />
+    <div className="page-container" style={{ height: 'calc(100vh - 110px)', display: 'flex', flexDirection: 'column', gap: 12 }}>
+      {/* 1. Header Toolbar */}
+      <div className="surface-card" style={{ padding: '10px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={{ width: 34, height: 34, borderRadius: 8, background: 'var(--brand-soft)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--brand-lilac)' }}>
+            <Sparkles size={18} />
           </div>
           <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <h2 style={{ fontSize: '1.05rem', fontWeight: 700, margin: 0, color: 'var(--text-primary)' }}>NetX AI Assistant</h2>
-              <span className="badge-modern" style={{ background: 'rgba(124, 58, 237, 0.15)', color: 'var(--accent-purple)', fontSize: '0.72rem', padding: '2px 8px', borderRadius: '6px', fontWeight: 600 }}>
-                Local LLM
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontWeight: 700, fontSize: '0.98rem' }}>NetX AI Assistant</span>
+              <span
+                style={{
+                  fontSize: '0.72rem',
+                  padding: '2px 8px',
+                  borderRadius: 12,
+                  fontWeight: 650,
+                  background:
+                    settings.aiProvider === 'gemini' && settings.geminiApiKey
+                      ? 'rgba(16, 185, 129, 0.15)'
+                      : settings.aiProvider === 'ollama' && ollamaStatus.online
+                      ? 'rgba(16, 185, 129, 0.15)'
+                      : 'rgba(139, 92, 246, 0.15)',
+                  color:
+                    settings.aiProvider === 'gemini' && settings.geminiApiKey
+                      ? '#10b981'
+                      : settings.aiProvider === 'ollama' && ollamaStatus.online
+                      ? '#10b981'
+                      : 'var(--brand-lilac)',
+                }}
+              >
+                {settings.aiProvider === 'gemini' && settings.geminiApiKey
+                  ? '⚡ Gemini Online'
+                  : settings.aiProvider === 'ollama' && ollamaStatus.online
+                  ? `⚡ Ollama (${settings.ollamaModel})`
+                  : '💻 Offline Native Engine'}
               </span>
             </div>
-            <p style={{ margin: 0, fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
-              100% On-Device Operations & Telemetry Intelligence
-            </p>
+            <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+              Personalized for <strong style={{ color: 'var(--brand-lilac)' }}>{userName}</strong> · Network Diagnostics &amp; Chat
+            </div>
           </div>
         </div>
 
-        {/* Ollama Status Badge & Model Picker */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          {ollamaStatus.online ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '4px 10px', borderRadius: '8px', background: 'rgba(16, 185, 129, 0.1)', border: '1px solid rgba(16, 185, 129, 0.3)', color: '#10b981', fontSize: '0.78rem', fontWeight: 600 }}>
-                <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: '#10b981', boxShadow: '0 0 8px #10b981' }}></span>
-                Ollama {ollamaStatus.version || 'v0.5'}
-              </div>
-
-              {/* Model Dropdown */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                <Cpu size={14} style={{ color: 'var(--text-secondary)' }} />
-                <select
-                  value={settings.ollamaModel}
-                  onChange={(e) => updateSettings({ ollamaModel: e.target.value })}
-                  style={{
-                    background: 'var(--bg-tertiary)',
-                    border: '1px solid var(--border-default)',
-                    color: 'var(--text-primary)',
-                    borderRadius: '8px',
-                    padding: '4px 10px',
-                    fontSize: '0.82rem',
-                    fontWeight: 600,
-                    outline: 'none',
-                    cursor: 'pointer',
-                  }}
-                >
-                  {ollamaStatus.models.map((m) => (
-                    <option key={m.name} value={m.name}>
-                      {m.name} ({m.parameterSize || `${(m.size / 1e9).toFixed(1)}GB`})
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-          ) : (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '4px 10px', borderRadius: '8px', background: 'rgba(245, 158, 11, 0.1)', border: '1px solid rgba(245, 158, 11, 0.3)', color: '#f59e0b', fontSize: '0.78rem', fontWeight: 600 }}>
-                <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: '#f59e0b' }}></span>
-                Native Engine (Ollama Offline)
-              </div>
-              <button
-                className="btn-secondary"
-                onClick={() => setShowSetupModal(true)}
-                style={{ padding: '4px 10px', fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: '5px' }}
-              >
-                <HelpCircle size={13} />
-                Setup Ollama
-              </button>
-            </div>
-          )}
-
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <button
-            className="btn-icon"
-            onClick={refreshOllama}
-            disabled={isCheckingOllama}
-            title="Refresh Ollama status"
-            style={{ width: '32px', height: '32px', padding: 0 }}
+            className="btn-secondary"
+            onClick={() => setActiveNav('settings')}
+            style={{ padding: '6px 12px', fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: 6 }}
+            title="Configure AI model or add free Gemini key"
           >
-            <RefreshCw size={14} className={isCheckingOllama ? 'spin' : ''} />
+            <Key size={13} />
+            <span>AI Settings</span>
           </button>
-
           <button
-            className="btn-icon"
-            onClick={handleClearHistory}
-            title="Clear conversation history"
-            style={{ width: '32px', height: '32px', padding: 0 }}
+            className="btn-ghost"
+            onClick={clearChatHistory}
+            style={{ padding: '6px 10px', fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: 5 }}
+            title="Clear conversation"
           >
-            <Trash2 size={14} />
+            <Trash2 size={13} />
+            <span>Clear</span>
           </button>
         </div>
       </div>
 
-      {/* 2. Main Chat Conversation Body */}
+      {/* 2. Message History Viewport */}
       <div
         ref={chatScrollRef}
-        className="surface-card"
         style={{
           flex: 1,
           overflowY: 'auto',
-          padding: '20px',
           display: 'flex',
           flexDirection: 'column',
-          gap: '16px',
-          marginBottom: '14px',
+          gap: 16,
+          padding: '12px 4px',
         }}
       >
         {messages.map((msg) => (
@@ -837,202 +964,109 @@ ${result.overallPassed ? '🟢 **All 4 baseline tests passed.** Your local netwo
             key={msg.id}
             style={{
               display: 'flex',
-              flexDirection: 'column',
-              alignItems: msg.role === 'user' ? 'flex-end' : 'flex-start',
-              gap: '6px',
+              gap: 12,
+              alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
+              maxWidth: msg.role === 'user' ? '82%' : '88%',
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.74rem', color: 'var(--text-secondary)' }}>
-              {msg.role === 'assistant' ? (
-                <>
-                  <Bot size={13} style={{ color: 'var(--accent-purple)' }} />
-                  <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>NetX AI</span>
-                  {msg.isNativeFallback && (
-                    <span style={{ background: 'rgba(245, 158, 11, 0.1)', color: '#f59e0b', padding: '1px 5px', borderRadius: '4px', fontSize: '0.68rem' }}>
-                      Native Engine
-                    </span>
-                  )}
-                </>
-              ) : (
-                <span style={{ fontWeight: 600 }}>You</span>
-              )}
-              <span>· {msg.timestamp}</span>
-            </div>
+            {msg.role !== 'user' && (
+              <div
+                style={{
+                  width: 32,
+                  height: 32,
+                  borderRadius: 8,
+                  background: 'var(--brand-soft)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: 'var(--brand-lilac)',
+                  flexShrink: 0,
+                  marginTop: 2,
+                }}
+              >
+                <Bot size={17} />
+              </div>
+            )}
 
-            {/* Bubble */}
-            <div
-              style={{
-                maxWidth: '85%',
-                padding: '12px 16px',
-                borderRadius: msg.role === 'user' ? '14px 14px 2px 14px' : '14px 14px 14px 2px',
-                background:
-                  msg.role === 'user'
-                    ? 'linear-gradient(135deg, #7c3aed, #6366f1)'
-                    : 'var(--bg-secondary)',
-                color: msg.role === 'user' ? '#ffffff' : 'var(--text-primary)',
-                border: msg.role === 'user' ? 'none' : '1px solid var(--border-default)',
-                boxShadow: msg.role === 'user' ? '0 4px 12px rgba(124, 58, 237, 0.2)' : 'var(--shadow-sm)',
-                fontSize: '0.9rem',
-                lineHeight: 1.55,
-                whiteSpace: 'pre-wrap',
-                wordBreak: 'break-word',
-              }}
-            >
-              {msg.content}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <div
+                style={{
+                  padding: '12px 16px',
+                  borderRadius: msg.role === 'user' ? '14px 14px 2px 14px' : '14px 14px 14px 2px',
+                  background:
+                    msg.role === 'user'
+                      ? 'linear-gradient(135deg, rgba(139, 92, 246, 0.95), rgba(168, 85, 247, 0.95))'
+                      : 'var(--bg-surface-elevated)',
+                  border: msg.role === 'user' ? 'none' : '1px solid var(--border-default)',
+                  color: msg.role === 'user' ? '#ffffff' : 'var(--text-primary)',
+                  fontSize: '0.90rem',
+                  lineHeight: 1.55,
+                  boxShadow: '0 4px 14px rgba(0, 0, 0, 0.15)',
+                  whiteSpace: 'pre-wrap',
+                }}
+              >
+                {msg.content}
+              </div>
 
-              {/* A. Tool Confirmation Card */}
-              {msg.toolExecution && msg.toolExecution.status === 'confirming' && (
-                <div
-                  style={{
-                    marginTop: '12px',
-                    padding: '14px',
-                    borderRadius: '10px',
-                    background: 'rgba(239, 68, 68, 0.08)',
-                    border: '1px solid rgba(239, 68, 68, 0.3)',
-                    color: 'var(--text-primary)',
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#ef4444', fontWeight: 700, fontSize: '0.88rem', marginBottom: '6px' }}>
-                    <ShieldAlert size={18} />
-                    <span>User Confirmation Required: {msg.toolExecution.displayName}</span>
-                  </div>
-                  <p style={{ margin: '0 0 12px 0', fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
-                    This operation will modify active network adapters or routing. Active downloads, SSH sessions, or calls may momentarily disconnect.
-                  </p>
-                  <div style={{ display: 'flex', gap: '10px' }}>
-                    <button
-                      className="btn-primary"
-                      onClick={() => handleConfirmAction(msg.id, msg.toolExecution!.toolName, msg.toolExecution!.args)}
-                      style={{ background: '#ef4444', borderColor: '#ef4444', fontSize: '0.82rem', padding: '6px 14px' }}
-                    >
-                      <CheckCircle2 size={14} style={{ marginRight: '6px' }} />
-                      Confirm & Execute
-                    </button>
-                    <button
-                      className="btn-secondary"
-                      onClick={() => handleCancelAction(msg.id)}
-                      style={{ fontSize: '0.82rem', padding: '6px 14px' }}
-                    >
-                      <X size={14} style={{ marginRight: '6px' }} />
-                      Cancel Action
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* B. Tool Running Progress Indicator */}
-              {msg.toolExecution && msg.toolExecution.status === 'running' && (
-                <div
-                  style={{
-                    marginTop: '10px',
-                    padding: '10px 14px',
-                    borderRadius: '8px',
-                    background: 'rgba(124, 58, 237, 0.1)',
-                    border: '1px solid rgba(124, 58, 237, 0.25)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '10px',
-                    fontSize: '0.84rem',
-                    color: 'var(--accent-purple)',
-                    fontWeight: 600,
-                  }}
-                >
-                  <RefreshCw size={16} className="spin" />
-                  <span>Executing {msg.toolExecution.displayName}...</span>
-                </div>
-              )}
-
-              {/* C. Diagnostic Structured Breakdown Card */}
-              {msg.toolExecution?.analysis && (
-                <div
-                  style={{
-                    marginTop: '14px',
-                    padding: '16px',
-                    borderRadius: '10px',
-                    background: 'var(--bg-tertiary)',
-                    border: '1px solid var(--border-default)',
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
-                    <span style={{ fontSize: '0.78rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-secondary)', fontWeight: 700 }}>
-                      Diagnostic Fault Domain
-                    </span>
-                    <span
-                      style={{
-                        padding: '3px 10px',
-                        borderRadius: '6px',
-                        fontSize: '0.76rem',
-                        fontWeight: 700,
-                        background:
-                          msg.toolExecution.analysis.status === 'healthy'
-                            ? 'rgba(16, 185, 129, 0.15)'
-                            : msg.toolExecution.analysis.status === 'warning'
-                            ? 'rgba(245, 158, 11, 0.15)'
-                            : 'rgba(239, 68, 68, 0.15)',
-                        color:
-                          msg.toolExecution.analysis.status === 'healthy'
-                            ? '#10b981'
-                            : msg.toolExecution.analysis.status === 'warning'
-                            ? '#f59e0b'
-                            : '#ef4444',
-                      }}
-                    >
-                      {msg.toolExecution.analysis.faultDomain}
-                    </span>
-                  </div>
-
-                  <div style={{ fontSize: '0.82rem', marginBottom: '10px', color: 'var(--text-secondary)' }}>
-                    <strong>Confidence:</strong> {msg.toolExecution.analysis.confidence}
-                  </div>
-
-                  {/* Supporting Evidence */}
-                  <div style={{ marginBottom: '10px' }}>
-                    <div style={{ fontSize: '0.76rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '4px' }}>
-                      VERIFIED MEASUREMENTS:
+              {/* Wi-Fi Quick Connect Cards (if list_wifi_networks completed) */}
+              {msg.toolExecution?.toolName === 'list_wifi_networks' &&
+                msg.toolExecution.status === 'completed' &&
+                msg.toolExecution.result?.networks?.length > 0 && (
+                  <div style={{ marginTop: 4, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    <div style={{ fontSize: '0.76rem', fontWeight: 700, color: 'var(--text-secondary)', paddingLeft: 2 }}>
+                      DETECTED WIRELESS NETWORKS:
                     </div>
-                    <ul style={{ margin: 0, paddingLeft: '18px', fontSize: '0.82rem' }}>
-                      {msg.toolExecution.analysis.evidence.map((ev, i) => (
-                        <li key={i} style={{ marginBottom: '2px' }}>{ev}</li>
-                      ))}
-                    </ul>
+                    {msg.toolExecution.result.networks.slice(0, 6).map((net: any) => (
+                      <div key={net.bssid || net.ssid} className="wifi-quick-card">
+                        <div className="wifi-quick-left">
+                          <Wifi size={15} style={{ color: net.connected ? 'var(--status-success)' : 'var(--brand-lilac)' }} />
+                          <div>
+                            <div className="wifi-quick-name">
+                              {net.ssid}
+                              {net.connected && (
+                                <span style={{ fontSize: '0.72rem', color: 'var(--status-success)', marginLeft: 6, fontWeight: 700 }}>
+                                  ● Active
+                                </span>
+                              )}
+                            </div>
+                            <div className="wifi-quick-meta">
+                              {net.signalQuality}% signal ({net.signalDbm} dBm) · {net.band} · {net.security}
+                            </div>
+                          </div>
+                        </div>
+                        {!net.connected && (
+                          <button
+                            className="btn-primary"
+                            style={{ padding: '4px 12px', fontSize: '0.78rem' }}
+                            onClick={() => handleInitiateWifiConnect(msg.id, net.ssid, net.security)}
+                          >
+                            Connect
+                          </button>
+                        )}
+                      </div>
+                    ))}
                   </div>
+                )}
 
-                  {/* Recommendations */}
-                  <div>
-                    <div style={{ fontSize: '0.76rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '4px' }}>
-                      RECOMMENDED ACTION:
-                    </div>
-                    <ul style={{ margin: 0, paddingLeft: '18px', fontSize: '0.82rem' }}>
-                      {msg.toolExecution.analysis.recommendations.map((rec, i) => (
-                        <li key={i} style={{ marginBottom: '2px' }}>{rec}</li>
-                      ))}
-                    </ul>
-                  </div>
-                </div>
-              )}
-
-              {/* D. Wi-Fi Secure Password Prompt Card */}
+              {/* Inline Wi-Fi Password Prompt */}
               {msg.requiresPassword && !msg.requiresPassword.submitted && (
                 <div
                   style={{
-                    marginTop: '12px',
-                    padding: '14px',
-                    borderRadius: '10px',
-                    background: 'var(--bg-tertiary)',
-                    border: '1px solid var(--border-default)',
+                    marginTop: 8,
+                    padding: 12,
+                    borderRadius: 10,
+                    background: 'var(--bg-surface-elevated)',
+                    border: '1px solid var(--border-strong)',
                   }}
                 >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 700, fontSize: '0.88rem', marginBottom: '6px' }}>
-                    <Lock size={16} style={{ color: 'var(--accent-purple)' }} />
-                    <span>Password Required for "{msg.requiresPassword.ssid}"</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700, fontSize: '0.85rem', marginBottom: 6 }}>
+                    <Lock size={15} style={{ color: 'var(--brand-lilac)' }} />
+                    <span>Enter Password for "{msg.requiresPassword.ssid}"</span>
                   </div>
-                  <p style={{ margin: '0 0 10px 0', fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
-                    🔒 Password is used directly by Windows to establish the connection and is <strong>never sent to the AI model or logged</strong>.
-                  </p>
-                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                  <div style={{ display: 'flex', gap: 8 }}>
                     <input
                       type={showWifiPassword[msg.requiresPassword.ssid] ? 'text' : 'password'}
-                      placeholder="Enter Wi-Fi security key..."
+                      placeholder="Wi-Fi security key..."
                       value={wifiPasswordInputs[msg.requiresPassword.ssid] || ''}
                       onChange={(e) =>
                         setWifiPasswordInputs((prev) => ({
@@ -1040,11 +1074,16 @@ ${result.overallPassed ? '🟢 **All 4 baseline tests passed.** Your local netwo
                           [msg.requiresPassword!.ssid]: e.target.value,
                         }))
                       }
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          handleConnectWifiSubmit(msg.id, msg.requiresPassword!.ssid);
+                        }
+                      }}
                       style={{
                         flex: 1,
-                        padding: '6px 12px',
-                        borderRadius: '6px',
-                        background: 'var(--bg-secondary)',
+                        padding: '6px 10px',
+                        borderRadius: 6,
+                        background: 'var(--bg-surface-subtle)',
                         border: '1px solid var(--border-default)',
                         color: 'var(--text-primary)',
                         fontSize: '0.84rem',
@@ -1052,20 +1091,20 @@ ${result.overallPassed ? '🟢 **All 4 baseline tests passed.** Your local netwo
                     />
                     <button
                       className="btn-secondary"
+                      style={{ padding: '6px 10px', fontSize: '0.78rem' }}
                       onClick={() =>
                         setShowWifiPassword((prev) => ({
                           ...prev,
                           [msg.requiresPassword!.ssid]: !prev[msg.requiresPassword!.ssid],
                         }))
                       }
-                      style={{ padding: '6px 10px', fontSize: '0.78rem' }}
                     >
                       {showWifiPassword[msg.requiresPassword.ssid] ? 'Hide' : 'Show'}
                     </button>
                     <button
                       className="btn-primary"
+                      style={{ padding: '6px 14px', fontSize: '0.82rem' }}
                       onClick={() => handleConnectWifiSubmit(msg.id, msg.requiresPassword!.ssid)}
-                      style={{ padding: '6px 14px', fontSize: '0.84rem' }}
                     >
                       Connect
                     </button>
@@ -1073,27 +1112,27 @@ ${result.overallPassed ? '🟢 **All 4 baseline tests passed.** Your local netwo
                 </div>
               )}
 
-              {/* E. Actionable Suggestion Buttons */}
+              {/* Action Suggestion Chips */}
               {msg.suggestedActions && msg.suggestedActions.length > 0 && (
-                <div style={{ marginTop: '12px', display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                <div style={{ marginTop: 4, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                   {msg.suggestedActions.map((act, i) => (
                     <button
                       key={i}
                       className="btn-secondary"
-                      onClick={() => handleSendMessage(`Run ${act.label}`)}
+                      onClick={() => handleSendMessage(act.query || `Run ${act.label}`)}
                       style={{
-                        padding: '5px 12px',
-                        fontSize: '0.8rem',
+                        padding: '4px 12px',
+                        fontSize: '0.78rem',
                         display: 'flex',
                         alignItems: 'center',
-                        gap: '6px',
-                        background: 'rgba(124, 58, 237, 0.1)',
-                        borderColor: 'rgba(124, 58, 237, 0.3)',
-                        color: 'var(--accent-purple)',
+                        gap: 6,
+                        background: 'rgba(139, 92, 246, 0.1)',
+                        borderColor: 'rgba(139, 92, 246, 0.3)',
+                        color: 'var(--brand-lilac)',
                         fontWeight: 600,
                       }}
                     >
-                      <Wrench size={13} />
+                      <Sparkles size={12} />
                       {act.label}
                     </button>
                   ))}
@@ -1103,17 +1142,24 @@ ${result.overallPassed ? '🟢 **All 4 baseline tests passed.** Your local netwo
           </div>
         ))}
 
-        {/* Live execution status indicator */}
-        {runningActionStatus && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 16px', borderRadius: '10px', background: 'rgba(124, 58, 237, 0.08)', border: '1px solid rgba(124, 58, 237, 0.2)', color: 'var(--accent-purple)', fontSize: '0.85rem', fontWeight: 600, alignSelf: 'flex-start' }}>
-            <RefreshCw size={15} className="spin" />
-            <span>{runningActionStatus}</span>
+        {/* 3. ChatGPT-Style Animated Thinking Indicator */}
+        {isProcessing && (
+          <div className="typing-bubble-container">
+            <div className="typing-avatar-glow">
+              <Sparkles size={15} />
+            </div>
+            <div className="typing-dots">
+              <span className="typing-dot" />
+              <span className="typing-dot" />
+              <span className="typing-dot" />
+            </div>
+            <span className="typing-status-label">{runningActionStatus || 'NetX AI is thinking...'}</span>
           </div>
         )}
       </div>
 
-      {/* 3. Quick Action Chips */}
-      <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', paddingBottom: '10px', whiteSpace: 'nowrap' }}>
+      {/* 4. Quick Action Chips */}
+      <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 6, whiteSpace: 'nowrap' }}>
         {QUICK_PROMPTS.map((p, i) => (
           <button
             key={i}
@@ -1121,11 +1167,11 @@ ${result.overallPassed ? '🟢 **All 4 baseline tests passed.** Your local netwo
             onClick={() => handleSendMessage(p.query)}
             disabled={isProcessing}
             style={{
-              padding: '6px 14px',
-              fontSize: '0.8rem',
-              borderRadius: '20px',
+              padding: '5px 12px',
+              fontSize: '0.78rem',
+              borderRadius: 18,
               fontWeight: 600,
-              background: 'var(--bg-secondary)',
+              background: 'var(--bg-surface-subtle)',
               border: '1px solid var(--border-default)',
               color: 'var(--text-primary)',
               cursor: 'pointer',
@@ -1137,12 +1183,12 @@ ${result.overallPassed ? '🟢 **All 4 baseline tests passed.** Your local netwo
         ))}
       </div>
 
-      {/* 4. Natural-Language Input Bar */}
-      <div className="surface-card" style={{ padding: '10px 14px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+      {/* 5. Natural-Language Input Bar */}
+      <div className="surface-card" style={{ padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 10 }}>
         <input
           ref={inputRef}
           type="text"
-          placeholder="Ask NetX AI anything about your network, or run diagnostics..."
+          placeholder="Ask NetX AI anything, scan Wi-Fi, or test connection..."
           value={inputQuery}
           onChange={(e) => setInputQuery(e.target.value)}
           onKeyDown={(e) => {
@@ -1167,147 +1213,12 @@ ${result.overallPassed ? '🟢 **All 4 baseline tests passed.** Your local netwo
           className="btn-primary"
           onClick={() => handleSendMessage()}
           disabled={!inputQuery.trim() || isProcessing}
-          style={{
-            padding: '8px 16px',
-            borderRadius: '8px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-            fontSize: '0.88rem',
-            fontWeight: 600,
-          }}
+          style={{ padding: '8px 16px', display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem' }}
         >
-          <Send size={15} />
-          Send
+          <Send size={14} />
+          <span>Send</span>
         </button>
       </div>
-
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 4px', fontSize: '0.72rem', color: 'var(--text-secondary)' }}>
-        <span>🔒 NetX AI operates locally via Ollama. No network data or credentials leave your PC.</span>
-        <span>Press <kbd style={{ padding: '1px 5px', borderRadius: '4px', background: 'var(--bg-tertiary)', border: '1px solid var(--border-default)' }}>Enter</kbd> to send</span>
-      </div>
-
-      {/* 5. Ollama Setup Modal */}
-      {showSetupModal && (
-        <div
-          style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            background: 'rgba(0, 0, 0, 0.7)',
-            backdropFilter: 'blur(4px)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 9999,
-          }}
-        >
-          <div
-            className="surface-card"
-            style={{
-              width: '90%',
-              maxWidth: '600px',
-              maxHeight: '85vh',
-              overflowY: 'auto',
-              padding: '24px',
-              borderRadius: '16px',
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <Cpu size={22} style={{ color: 'var(--accent-purple)' }} />
-                <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 700 }}>Ollama Local AI Setup</h3>
-              </div>
-              <button className="btn-icon" onClick={() => setShowSetupModal(false)}>
-                <X size={18} />
-              </button>
-            </div>
-
-            <p style={{ fontSize: '0.88rem', color: 'var(--text-secondary)', lineHeight: 1.5, marginBottom: '16px' }}>
-              NetX uses <strong>Ollama</strong> as its on-device neural reasoning engine. Running Ollama locally gives you private, fast, offline network intelligence with zero API keys.
-            </p>
-
-            <div style={{ background: 'var(--bg-tertiary)', borderRadius: '10px', padding: '16px', marginBottom: '18px' }}>
-              <h4 style={{ margin: '0 0 10px 0', fontSize: '0.92rem', color: 'var(--text-primary)' }}>1. Install Ollama for Windows</h4>
-              <p style={{ margin: '0 0 12px 0', fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
-                Download and install the official Windows installer from the Ollama project website:
-              </p>
-              <a
-                href="https://ollama.com/download/windows"
-                target="_blank"
-                rel="noreferrer"
-                className="btn-secondary"
-                style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', fontSize: '0.82rem', padding: '6px 14px' }}
-              >
-                <Download size={14} />
-                Download Ollama for Windows
-                <ExternalLink size={12} />
-              </a>
-            </div>
-
-            <div style={{ background: 'var(--bg-tertiary)', borderRadius: '10px', padding: '16px', marginBottom: '18px' }}>
-              <h4 style={{ margin: '0 0 10px 0', fontSize: '0.92rem', color: 'var(--text-primary)' }}>2. Pull a Recommended Model</h4>
-              <p style={{ margin: '0 0 12px 0', fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
-                Open PowerShell or Windows Terminal and run one of these commands to download a model:
-              </p>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                {RECOMMENDED_MODELS.map((m) => (
-                  <div
-                    key={m.tag}
-                    style={{
-                      padding: '10px 14px',
-                      borderRadius: '8px',
-                      background: 'var(--bg-secondary)',
-                      border: '1px solid var(--border-default)',
-                    }}
-                  >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                      <span style={{ fontWeight: 700, fontSize: '0.86rem', color: 'var(--text-primary)' }}>
-                        {m.name} ({m.paramSize})
-                      </span>
-                      <span style={{ fontSize: '0.74rem', color: 'var(--text-secondary)' }}>VRAM: {m.vram}</span>
-                    </div>
-                    <p style={{ margin: '0 0 8px 0', fontSize: '0.78rem', color: 'var(--text-secondary)' }}>{m.description}</p>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'var(--bg-primary)', padding: '6px 10px', borderRadius: '6px' }}>
-                      <code style={{ fontSize: '0.8rem', color: 'var(--accent-purple)' }}>{m.command}</code>
-                      <button
-                        className="btn-icon"
-                        title="Copy command"
-                        onClick={() => {
-                          navigator.clipboard.writeText(m.command);
-                          pushToast(`Copied "${m.command}"`, 'info');
-                        }}
-                        style={{ width: '26px', height: '26px' }}
-                      >
-                        <Copy size={12} />
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
-              <button
-                className="btn-primary"
-                onClick={async () => {
-                  await refreshOllama();
-                  if (ollamaStatus.online) {
-                    setShowSetupModal(false);
-                    pushToast('Ollama connected successfully!', 'success');
-                  }
-                }}
-                style={{ fontSize: '0.86rem', padding: '8px 18px' }}
-              >
-                Test Connection & Close
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

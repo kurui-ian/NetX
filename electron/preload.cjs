@@ -28,5 +28,7 @@ contextBridge.exposeInMainWorld('netxNative', {
   connectWifi: (ssid, password) => ipcRenderer.invoke('netx:connect-wifi', { ssid, password }),
   getOllamaStatus: (url) => ipcRenderer.invoke('netx:ollama-status', { url }),
   chatOllama: (payload) => ipcRenderer.invoke('netx:ollama-chat', payload),
+  chatGemini: (payload) => ipcRenderer.invoke('netx:gemini-chat', payload),
+  getSystemUser: () => ipcRenderer.invoke('netx:get-system-user'),
   quitApp: () => ipcRenderer.invoke('netx:quit-app'),
 });
