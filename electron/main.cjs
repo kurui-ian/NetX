@@ -1813,7 +1813,10 @@ ipcMain.handle('netx:connect-wifi', async (_event, { ssid, password = '' }) => {
   if (!ssid || typeof ssid !== 'string') {
     return { ok: false, error: 'Invalid SSID provided.' };
   }
-  const cleanSsid = ssid.trim();
+  const cleanSsid = ssid.replace(/["`&|;]/g, '').trim();
+  if (!cleanSsid) {
+    return { ok: false, error: 'Invalid SSID provided.' };
+  }
   try {
     // Check if profile exists
     let hasProfile = false;

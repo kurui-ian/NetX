@@ -5,6 +5,7 @@ import { fileURLToPath } from 'url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, '..');
 const releaseAppDir = path.join(rootDir, 'release', 'NetX-win32-x64', 'resources', 'app');
+const rootPkg = JSON.parse(fs.readFileSync(path.join(rootDir, 'package.json'), 'utf8'));
 
 // Ensure release/NetX-win32-x64/resources/app exists and is clean
 fs.rmSync(releaseAppDir, { recursive: true, force: true });
@@ -20,7 +21,7 @@ fs.cpSync(path.join(rootDir, 'electron'), path.join(releaseAppDir, 'electron'), 
 const pkg = {
   name: 'netx',
   productName: 'NetX',
-  version: '1.0.0',
+  version: rootPkg.version || '1.0.1',
   description: 'NetX — Native Windows Network Utility & Telemetry Suite',
   main: 'electron/main.cjs',
 };
