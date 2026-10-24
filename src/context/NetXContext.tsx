@@ -18,7 +18,7 @@ import {
 import { DEFAULT_GEMINI_API_KEY, DEFAULT_GEMINI_MODEL } from '../services/geminiClient';
 
 const DEFAULT_SETTINGS: NetXSettings = {
-  appearance: 'system',
+  appearance: 'dark',
   startWithWindows: false,
   startMinimized: false,
   notifyConnectionChanges: true,
@@ -136,7 +136,7 @@ export const NetXProvider: React.FC<{ children: React.ReactNode }> = ({ children
         ...parsed,
         geminiApiKey,
         geminiModel,
-        appearance: savedTheme || parsed.appearance || 'system',
+        appearance: savedTheme || parsed.appearance || 'dark',
       };
     } catch {
       return DEFAULT_SETTINGS;

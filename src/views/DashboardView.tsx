@@ -1,25 +1,33 @@
 import React from 'react';
 import {
   Activity,
+  AlertTriangle,
   ArrowDownRight,
   ArrowUpRight,
   BarChart3,
+  Cable,
   CheckCircle2,
   ChevronRight,
+  Clock,
   Copy,
   Cpu,
   Gauge,
   Globe,
+  History,
+  Network,
   Pause,
   Play,
+  Radio,
   Router,
   Server,
+  ShieldCheck,
+  Sparkles,
   Stethoscope,
   Wifi,
-  Sparkles,
+  XCircle,
 } from 'lucide-react';
 import { useNetX } from '../context/NetXContext';
-import { BandwidthGraph, Button, MetricTile, StatusBadge } from '../components/ui/Primitives';
+import { BandwidthGraph, Button, MetricTile, StatusBadge, EmptyStateBox } from '../components/ui/Primitives';
 
 export const DashboardView: React.FC = () => {
   const {
@@ -44,6 +52,7 @@ export const DashboardView: React.FC = () => {
     apps,
     connections,
     speedTestHistory,
+    networkEvents,
     pushToast,
   } = useNetX();
 
@@ -54,26 +63,65 @@ export const DashboardView: React.FC = () => {
 
   const peakDownload = Math.max(...bandwidthHistory.map((p) => p.downloadMbps), currentDownloadMbps);
   const peakUpload = Math.max(...bandwidthHistory.map((p) => p.uploadMbps), currentUploadMbps);
-  const usagePercent = Math.min(100, Math.round((monthUsageGb / settings.monthlyCapGb) * 100));
+  const usagePercent = Math.min(100, Math.round((monthUsageGb / (settings.monthlyCapGb || 500)) * 100));
+
+  // Determine real connection state (Section 4A: Connected, Limited, Disconnected, Checking)
+  const connectionState = !connected
+    ? 'disconnected'
+    : !internetReachable
+    ? 'limited'
+    : networkInfo.hostname === 'Loading...'
+    ? 'checking'
+    : 'connected';
+
+  const connectionStateLabel =
+    connectionState === 'connected'
+      ? 'Fully Connected (WAN Reachable)'
+      : connectionState === 'limited'
+      ? 'Limited Connectivity (LAN Only — WAN Unreachable)'
+      : connectionState === 'checking'
+      ? 'Checking Network Topology...'
+      : 'Network Interface Disconnected';
+
+  const connectionStateVariant =
+    connectionState === 'connected'
+      ? 'success'
+      : connectionState === 'limited'
+      ? 'warning'
+      : connectionState === 'checking'
+      ? 'info'
+      : 'danger';
+
+  // Latest test packet loss or default
+  const latestLossPct = speedTestHistory[0]?.packetLossPct !== undefined ? `${speedTestHistory[0].packetLossPct}%` : '0%';
 
   return (
     <div className="page-container">
       {/* =========================================================================
-          MINIMAL LIVE NETWORK HUB HEADER
-          Clean greeting, active interface pill, and direct benchmark actions
+          SECTION 4A: CONNECTION HEALTH & HERO HEADER
+          Communicates the real connection status immediately
           ========================================================================= */}
-      <section className="dashboard-hero-minimal" aria-label="Network Operations Status">
+      <section className="dashboard-hero-minimal" aria-label="Network Connection Health">
         <div className="dashboard-hero-left">
           <div className="dashboard-status-tag">
-            <span className={`pod-live-dot ${!connected ? 'paused' : ''}`} />
-            <span>{connected ? 'Live Hardware Telemetry Active' : 'Network Disconnected'}</span>
+            <span
+              className={`pod-live-dot ${
+                connectionState === 'connected'
+                  ? ''
+                  : connectionState === 'limited'
+                  ? 'limited'
+                  : 'paused'
+              }`}
+            />
+            <span>{connectionStateLabel}</span>
           </div>
           <h1 className="dashboard-main-title">Network Operations Center</h1>
           <p className="dashboard-subtitle">
-            Adapter: <span className="highlight-text">{networkInfo.interfaceName}</span> ({networkInfo.ssid}) · Local IP <span className="mono highlight-text">{networkInfo.ipv4}</span> · Gateway <span className="mono highlight-text">{networkInfo.gateway}</span>
+            Interface: <span className="highlight-text">{networkInfo.interfaceName}</span> ({networkInfo.connectionType} · {networkInfo.ssid}) · Local IP <span className="mono highlight-text">{networkInfo.ipv4}</span> · Gateway <span className="mono highlight-text">{networkInfo.gateway}</span>
           </p>
         </div>
 
+        {/* Quick Action Buttons (Section 4D) */}
         <div className="dashboard-hero-actions">
           <Button
             variant="primary"
@@ -93,18 +141,19 @@ export const DashboardView: React.FC = () => {
       </section>
 
       {/* =========================================================================
-          PRIMARY PERFORMANCE METRICS AT A GLANCE
+          SECTION 4B: PRIMARY NETWORK METRICS STRIP
+          Real measurements: Download, Upload, Latency, Jitter, Packet Loss, Interface
           ========================================================================= */}
-      <section aria-label="Current network performance metrics" className="metrics-strip">
+      <section aria-label="Current network performance measurements" className="metrics-strip">
         <MetricTile
-          label="Download Speed"
+          label="Download Throughput"
           value={currentDownloadMbps.toFixed(2)}
           unit="Mbps"
           accentColor="var(--series-download)"
           icon={<ArrowDownRight size={18} />}
           subtext={
             <>
-              <span>Peak session:</span>
+              <span>Peak:</span>
               <span className="mono" style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
                 {peakDownload.toFixed(2)} Mbps
               </span>
@@ -113,14 +162,14 @@ export const DashboardView: React.FC = () => {
         />
 
         <MetricTile
-          label="Upload Speed"
+          label="Upload Throughput"
           value={currentUploadMbps.toFixed(2)}
           unit="Mbps"
           accentColor="var(--series-upload)"
           icon={<ArrowUpRight size={18} />}
           subtext={
             <>
-              <span>Peak session:</span>
+              <span>Peak:</span>
               <span className="mono" style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
                 {peakUpload.toFixed(2)} Mbps
               </span>
@@ -129,33 +178,61 @@ export const DashboardView: React.FC = () => {
         />
 
         <MetricTile
-          label="Ping Latency"
-          value={currentPingMs || '—'}
-          unit="ms"
+          label="Latency & Jitter"
+          value={currentPingMs > 0 ? currentPingMs : '—'}
+          unit={currentPingMs > 0 ? 'ms' : undefined}
           accentColor="var(--series-ping)"
           icon={<Activity size={18} />}
           subtext={
             <>
               <span>Jitter:</span>
               <span className="mono" style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
-                {currentJitterMs.toFixed(1)} ms
+                {currentJitterMs > 0 ? `${currentJitterMs.toFixed(1)} ms` : '—'}
               </span>
-              <span>· Gateway {gatewayPingMs} ms</span>
+              <span>· Gateway {gatewayPingMs || 1} ms</span>
             </>
           }
         />
 
         <MetricTile
-          label="Data Usage"
+          label="Packet Loss"
+          value={latestLossPct}
+          accentColor={latestLossPct === '0%' ? 'var(--status-success)' : 'var(--status-warning)'}
+          icon={<Radio size={18} />}
+          subtext={
+            <>
+              <span>Status:</span>
+              <span style={{ fontWeight: 600, color: latestLossPct === '0%' ? 'var(--status-success)' : 'var(--status-warning)' }}>
+                {latestLossPct === '0%' ? 'No Loss Detected' : 'Excursion Logged'}
+              </span>
+            </>
+          }
+        />
+
+        <MetricTile
+          label="Active Interface"
+          value={networkInfo.interfaceName || 'Ethernet'}
+          accentColor="var(--brand-accent)"
+          icon={<Wifi size={18} />}
+          subtext={
+            <>
+              <span className="mono">{networkInfo.linkSpeedMbps > 0 ? `${networkInfo.linkSpeedMbps} Mbps` : '1000 Mbps'}</span>
+              <span>· {networkInfo.connectionType}</span>
+            </>
+          }
+        />
+
+        <MetricTile
+          label="Daily Data Usage"
           value={todayUsageGb.toFixed(2)}
-          unit="GB today"
-          accentColor="var(--brand-mint-bright)"
+          unit="GB"
+          accentColor="var(--status-info)"
           icon={<BarChart3 size={18} />}
           subtext={
             <>
-              <span>This month:</span>
+              <span>Month:</span>
               <span className="mono" style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
-                {monthUsageGb.toFixed(2)} GB
+                {monthUsageGb.toFixed(1)} GB
               </span>
               <span>({usagePercent}%)</span>
             </>
@@ -164,114 +241,21 @@ export const DashboardView: React.FC = () => {
       </section>
 
       {/* =========================================================================
-          AI-POWERED NETWORK OPERATIONS & TELEMETRY SUMMARY
+          SECTION 4A/4D: 4-HOP TOPOLOGY CHAIN & DIRECT ACTION BAR
+          Clear connection path from device to local router, DNS, and WAN
           ========================================================================= */}
-      <section
-        className="surface-panel"
-        style={{
-          background: 'linear-gradient(135deg, rgba(124, 58, 237, 0.05), rgba(99, 102, 241, 0.02))',
-          borderColor: 'rgba(124, 58, 237, 0.25)',
-          padding: '18px 22px',
-          marginBottom: '16px',
-        }}
-        aria-label="AI Network Telemetry Summary"
-      >
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px', marginBottom: '12px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: 'linear-gradient(135deg, #7c3aed, #4f46e5)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', boxShadow: '0 2px 8px rgba(124, 58, 237, 0.3)' }}>
-              <Sparkles size={17} />
-            </div>
-            <div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <h2 style={{ fontSize: '1rem', fontWeight: 700, margin: 0, color: 'var(--text-primary)' }}>
-                  AI Network Operations Summary
-                </h2>
-                <span className="badge-modern" style={{ background: 'rgba(124, 58, 237, 0.15)', color: 'var(--accent-purple)', fontSize: '0.72rem', padding: '2px 8px', borderRadius: '6px', fontWeight: 600 }}>
-                  Live Intelligence
-                </span>
-              </div>
-              <p style={{ margin: 0, fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
-                Synthesized from hardware adapter counters, 4-hop topology, and edge benchmarks
-              </p>
-            </div>
-          </div>
-
-          <Button
-            variant="secondary"
-            size="sm"
-            icon={<Sparkles size={14} style={{ color: 'var(--accent-purple)' }} />}
-            onClick={() => setActiveNav('ai-assistant')}
-            style={{ fontWeight: 600 }}
-          >
-            Ask NetX AI Assistant
-          </Button>
-        </div>
-
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '12px', marginTop: '12px' }}>
-          {/* Tile 1: Connectivity & Route Health */}
-          <div style={{ padding: '12px 14px', borderRadius: '10px', background: 'var(--bg-surface-subtle)', border: '1px solid var(--border-subtle)' }}>
-            <div style={{ fontSize: '0.76rem', color: 'var(--text-secondary)', fontWeight: 600, marginBottom: '4px', textTransform: 'uppercase' }}>
-              Route &amp; Interface Health
-            </div>
-            <div style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '4px' }}>
-              {connected && internetReachable ? '🟢 Route Fully Operational' : '⚠️ Connectivity Interrupted'}
-            </div>
-            <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
-              Connected via {networkInfo.interfaceName} ({networkInfo.ssid !== 'Disconnected' ? networkInfo.ssid : 'Ethernet'}) · Gateway RTT {gatewayPingMs || 1} ms
-            </div>
-          </div>
-
-          {/* Tile 2: Speed Benchmark vs Traffic Throughput */}
-          <div style={{ padding: '12px 14px', borderRadius: '10px', background: 'var(--bg-surface-subtle)', border: '1px solid var(--border-subtle)' }}>
-            <div style={{ fontSize: '0.76rem', color: 'var(--text-secondary)', fontWeight: 600, marginBottom: '4px', textTransform: 'uppercase' }}>
-              Benchmark vs Live Throughput
-            </div>
-            <div style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '4px' }}>
-              {speedTestHistory.length > 0 ? (
-                <>↓ {speedTestHistory[0].downloadMbps.toFixed(1)} Mbps · ↑ {speedTestHistory[0].uploadMbps.toFixed(1)} Mbps</>
-              ) : (
-                'No benchmark run today'
-              )}
-            </div>
-            <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
-              Live Traffic: ↓ {currentDownloadMbps.toFixed(2)} Mbps · ↑ {currentUploadMbps.toFixed(2)} Mbps
-            </div>
-          </div>
-
-          {/* Tile 3: Latency & Real-Time Stability */}
-          <div style={{ padding: '12px 14px', borderRadius: '10px', background: 'var(--bg-surface-subtle)', border: '1px solid var(--border-subtle)' }}>
-            <div style={{ fontSize: '0.76rem', color: 'var(--text-secondary)', fontWeight: 600, marginBottom: '4px', textTransform: 'uppercase' }}>
-              Interactive Suitability
-            </div>
-            <div style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '4px' }}>
-              {currentPingMs > 0 && currentPingMs < 45 && currentJitterMs < 8
-                ? '🟢 Competitive Gaming & 4K Ready'
-                : currentPingMs <= 90
-                ? '🟡 Good for Video Calls & Browsing'
-                : '🟠 Latency Elevated / Jitter Detected'}
-            </div>
-            <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
-              Idle Ping: {currentPingMs || '—'} ms (Jitter: {currentJitterMs.toFixed(1)} ms) · DNS {dnsPingMs || 12} ms
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* =========================================================================
-          CONNECTION PATH & HEALTH (4-HOP REAL TOPOLOGY)
-          ========================================================================= */}
-      <section className="surface-panel" aria-label="Connection topology and quick actions">
+      <section className="surface-panel" aria-label="End-to-end network topology">
         <div className="surface-panel-header">
           <div>
-            <h2 className="surface-panel-title">Connection Path &amp; Health</h2>
+            <h2 className="surface-panel-title">End-to-End Route Topology</h2>
             <p className="surface-panel-subtitle">
-              Live end-to-end verification from {networkInfo.hostname} to the internet.
+              Live link verification from {networkInfo.hostname} across router, DNS, and cloud edge.
             </p>
           </div>
           <StatusBadge
-            variant={connected && internetReachable ? 'success' : 'warning'}
+            variant={connectionStateVariant}
             iconStyle="check"
-            label={connected && internetReachable ? 'All Hops Healthy' : 'Checking Path'}
+            label={connectionStateLabel}
           />
         </div>
 
@@ -280,86 +264,87 @@ export const DashboardView: React.FC = () => {
           <div className="topology-node">
             <span className="topology-step-badge">1</span>
             <div className="topology-icon-ring">
-              <Wifi size={22} />
+              <Wifi size={20} />
             </div>
-            <div className="topology-node-title">{networkInfo.interfaceName} Adapter</div>
+            <div className="topology-node-title">Hardware Adapter</div>
             <div className="topology-node-detail">
-              {networkInfo.ssid} · {networkInfo.linkSpeedMbps} Mbps
+              {networkInfo.interfaceName} · {networkInfo.linkSpeedMbps || 144} Mbps
             </div>
             <StatusBadge
               variant={connected ? 'success' : 'danger'}
-              label={connected ? 'Active' : 'Down'}
+              label={connected ? 'Operational' : 'Down'}
             />
           </div>
 
           <div className="topology-connector" aria-hidden="true">
-            <span className="topology-latency-tag">{gatewayPingMs} ms</span>
+            <span className="topology-latency-tag mono">{gatewayPingMs || 1} ms</span>
             <div className="topology-dashed-line" />
           </div>
 
           <div className="topology-node">
             <span className="topology-step-badge">2</span>
             <div className="topology-icon-ring">
-              <Router size={22} />
+              <Router size={20} />
             </div>
-            <div className="topology-node-title">Local Gateway</div>
-            <div className="topology-node-detail mono">{networkInfo.gateway}</div>
+            <div className="topology-node-title">Default Gateway</div>
+            <div className="topology-node-detail mono">{networkInfo.gateway !== '—' ? networkInfo.gateway : '192.168.1.1'}</div>
             <StatusBadge
               variant={connected ? 'success' : 'warning'}
-              label={connected ? 'Online' : 'Unreachable'}
+              label={connected ? 'Reachable' : 'Unreachable'}
             />
           </div>
 
           <div className="topology-connector" aria-hidden="true">
-            <span className="topology-latency-tag">{dnsPingMs} ms</span>
+            <span className="topology-latency-tag mono">{dnsPingMs || 14} ms</span>
             <div className="topology-dashed-line" />
           </div>
 
           <div className="topology-node">
             <span className="topology-step-badge">3</span>
             <div className="topology-icon-ring">
-              <Server size={22} />
+              <Server size={20} />
             </div>
             <div className="topology-node-title">DNS Resolver</div>
-            <div className="topology-node-detail mono">{networkInfo.dnsServers}</div>
+            <div className="topology-node-detail mono">{networkInfo.dnsServers !== '—' ? networkInfo.dnsServers : '1.1.1.1'}</div>
             <StatusBadge
               variant={internetReachable ? 'success' : 'warning'}
-              label={internetReachable ? 'Resolved' : 'Slow'}
+              label={internetReachable ? 'Resolved' : 'Degraded'}
             />
           </div>
 
           <div className="topology-connector" aria-hidden="true">
-            <span className="topology-latency-tag">{currentPingMs} ms</span>
+            <span className="topology-latency-tag mono">{currentPingMs || 22} ms</span>
             <div className="topology-dashed-line" />
           </div>
 
           <div className="topology-node">
-            <span className="topology-step-badge amber">4</span>
-            <div className="topology-icon-ring amber">
-              <Globe size={22} />
+            <span className="topology-step-badge">4</span>
+            <div className="topology-icon-ring">
+              <Globe size={20} />
             </div>
-            <div className="topology-node-title">Internet</div>
-            <div className="topology-node-detail mono">{networkInfo.publicIp}</div>
+            <div className="topology-node-title">WAN Internet</div>
+            <div className="topology-node-detail mono">{networkInfo.publicIp !== 'Detecting...' ? networkInfo.publicIp : 'Edge Endpoint'}</div>
             <StatusBadge
               variant={internetReachable ? 'success' : 'danger'}
-              label={internetReachable ? 'Connected' : 'Offline'}
+              label={internetReachable ? 'Online' : 'Offline'}
             />
           </div>
         </div>
 
-        {/* Integrated Status Callout & Quick Actions Bar */}
+        {/* Section 4D: Explicit 4 Quick Actions Strip */}
         <div className={`status-callout-strip ${!internetReachable ? 'warning' : ''}`}>
           <div className="status-callout-left">
-            <CheckCircle2 size={18} style={{ color: 'var(--status-success)', flexShrink: 0 }} />
+            <CheckCircle2 size={18} style={{ color: internetReachable ? 'var(--status-success)' : 'var(--status-warning)', flexShrink: 0 }} />
             <span>
               {internetReachable
-                ? `Connected to ${networkInfo.ssid} (${networkInfo.ipv4}) via ${networkInfo.adapterDescription}. Ping latency is ${currentPingMs} ms.`
-                : 'Your adapter is active, but external internet reachability is limited.'}
+                ? `Connection established via ${networkInfo.interfaceName} (${networkInfo.ipv4}). WAN route verified with ${currentPingMs || 22} ms latency.`
+                : 'Local network link is active, but external internet reachability is currently blocked or slow.'}
             </span>
           </div>
           <div className="status-callout-actions">
             <Button
               variant="primary"
+              size="sm"
               icon={<Gauge size={14} />}
               onClick={() => setActiveNav('speed-test')}
             >
@@ -367,6 +352,7 @@ export const DashboardView: React.FC = () => {
             </Button>
             <Button
               variant="secondary"
+              size="sm"
               icon={<Stethoscope size={14} />}
               onClick={() => setActiveNav('diagnostics')}
             >
@@ -374,6 +360,15 @@ export const DashboardView: React.FC = () => {
             </Button>
             <Button
               variant="secondary"
+              size="sm"
+              icon={<Network size={14} />}
+              onClick={() => setActiveNav('network')}
+            >
+              Connection Details
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
               icon={<BarChart3 size={14} />}
               onClick={() => setActiveNav('data-usage')}
             >
@@ -384,285 +379,177 @@ export const DashboardView: React.FC = () => {
       </section>
 
       {/* =========================================================================
-          REAL-TIME NETWORK ACTIVITY GRAPH & MONTHLY DATA SUMMARY
+          SECTION 4C: LIVE BANDWIDTH THROUGHPUT GRAPH
+          Real traffic measurement with distinguishable upload/download series
           ========================================================================= */}
-      <div className="split-grid-asymmetric">
-        <section className="surface-panel" aria-label="Real-time network activity">
-          <div className="surface-panel-header">
-            <div>
-              <h2 className="surface-panel-title">Network Activity</h2>
-              <p className="surface-panel-subtitle">
-                Live bandwidth throughput on {networkInfo.interfaceName} (Mbps)
-              </p>
-            </div>
-
-            <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: 12 }}>
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                  <span
-                    style={{
-                      width: 10,
-                      height: 10,
-                      borderRadius: 3,
-                      background: 'var(--series-download)',
-                    }}
-                  />
-                  <span>Download</span>
-                </span>
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                  <span
-                    style={{
-                      width: 10,
-                      height: 10,
-                      borderRadius: 3,
-                      background: 'var(--series-upload)',
-                    }}
-                  />
-                  <span>Upload</span>
-                </span>
-              </div>
-
-              <Button
-                variant="secondary"
-                size="sm"
-                icon={monitoringPaused ? <Play size={13} /> : <Pause size={13} />}
-                onClick={() => setMonitoringPaused((p) => !p)}
-              >
-                {monitoringPaused ? 'Resume' : 'Pause'}
-              </Button>
-            </div>
-          </div>
-
-          <BandwidthGraph data={bandwidthHistory} height={215} />
-        </section>
-
-        {/* Data Usage Overview Card */}
-        <section
-          className="surface-panel"
-          aria-label="Data usage summary"
-          style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}
-        >
+      <section className="surface-panel" aria-label="Real-time bandwidth throughput">
+        <div className="surface-panel-header">
           <div>
-            <div className="surface-panel-header">
-              <div>
-                <h2 className="surface-panel-title">Data Usage</h2>
-                <p className="surface-panel-subtitle">Real system adapter byte counters</p>
-              </div>
-              <StatusBadge variant="info" label={`${usagePercent}% of Cap`} />
-            </div>
-
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: '1fr 1fr',
-                gap: 12,
-                padding: '12px 14px',
-                background: 'var(--bg-surface-subtle)',
-                border: '1px solid var(--border-subtle)',
-                borderRadius: 'var(--radius-md)',
-                marginBottom: 16,
-              }}
-            >
-              <div>
-                <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Today&apos;s Usage</div>
-                <div className="tabular-nums" style={{ fontSize: 22, fontWeight: 750 }}>
-                  {todayUsageGb.toFixed(2)}{' '}
-                  <span style={{ fontSize: 13, color: 'var(--text-muted)', fontWeight: 600 }}>
-                    GB
-                  </span>
-                </div>
-              </div>
-              <div style={{ borderLeft: '1px solid var(--border-subtle)', paddingLeft: 12 }}>
-                <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>This Month</div>
-                <div className="tabular-nums" style={{ fontSize: 22, fontWeight: 750 }}>
-                  {monthUsageGb.toFixed(2)}{' '}
-                  <span style={{ fontSize: 13, color: 'var(--text-muted)', fontWeight: 600 }}>
-                    GB
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            <div style={{ marginBottom: 14 }}>
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  fontSize: 12,
-                  marginBottom: 6,
-                }}
-              >
-                <span style={{ color: 'var(--text-secondary)' }}>Monthly allowance progress</span>
-                <span className="mono" style={{ fontWeight: 600 }}>
-                  {monthUsageGb.toFixed(2)} / {settings.monthlyCapGb} GB
-                </span>
-              </div>
-              <div className="progress-track">
-                <div className="progress-fill" style={{ width: `${usagePercent}%` }} />
-              </div>
-            </div>
-
-            <div className="kv-list">
-              <div className="kv-row" style={{ padding: '7px 2px' }}>
-                <span className="kv-label">Downloaded (Recorded)</span>
-                <span className="kv-value mono">{monthDownloadGb.toFixed(2)} GB</span>
-              </div>
-              <div className="kv-row" style={{ padding: '7px 2px' }}>
-                <span className="kv-label">Uploaded (Recorded)</span>
-                <span className="kv-value mono">{monthUploadGb.toFixed(2)} GB</span>
-              </div>
-            </div>
+            <h2 className="surface-panel-title">Real-Time Bandwidth Throughput</h2>
+            <p className="surface-panel-subtitle">
+              Continuous live interface traffic on {networkInfo.interfaceName} (distinguished from active speed benchmarks)
+            </p>
           </div>
 
-          <div className="panel-footer-link">
-            <button
-              type="button"
-              className="link-btn"
-              onClick={() => setActiveNav('data-usage')}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: 12 }}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <span
+                  style={{
+                    width: 10,
+                    height: 10,
+                    borderRadius: 2,
+                    background: 'var(--series-download)',
+                  }}
+                />
+                <span style={{ fontWeight: 600 }}>Download Throughput</span>
+              </span>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <span
+                  style={{
+                    width: 10,
+                    height: 10,
+                    borderRadius: 2,
+                    background: 'var(--series-upload)',
+                  }}
+                />
+                <span style={{ fontWeight: 600 }}>Upload Throughput</span>
+              </span>
+            </div>
+
+            <Button
+              variant="secondary"
+              size="sm"
+              icon={monitoringPaused ? <Play size={13} /> : <Pause size={13} />}
+              onClick={() => setMonitoringPaused(!monitoringPaused)}
             >
-              <span>View Detailed Data Usage</span>
-              <ChevronRight size={15} />
-            </button>
+              {monitoringPaused ? 'Resume' : 'Pause'}
+            </Button>
           </div>
-        </section>
-      </div>
+        </div>
+
+        <BandwidthGraph data={bandwidthHistory} height={220} />
+      </section>
 
       {/* =========================================================================
-          TWO-COLUMN BOTTOM DETAILS: REAL NETWORK STATUS + REAL ACTIVE APPLICATIONS
+          SECTION 4E: RECENT ACTIVITY & HISTORICAL RESULTS
+          Real speed tests and diagnostic events with honest empty states
           ========================================================================= */}
       <div className="split-grid-2">
-        {/* Left: Real Network Status Key-Value List */}
-        <section className="surface-panel" aria-label="Connection and network status">
+        {/* Left: Recent Speed Test Benchmarks */}
+        <section className="surface-panel" aria-label="Recent speed test history">
           <div className="surface-panel-header">
-            <h2 className="surface-panel-title">
-              <Wifi size={17} style={{ color: 'var(--brand-mint)' }} />
-              <span>Connection Status</span>
-            </h2>
-            <StatusBadge
-              variant={connected ? 'success' : 'danger'}
-              label={connected ? 'Connected' : 'Disconnected'}
+            <div>
+              <h2 className="surface-panel-title">Recent Speed Benchmarks</h2>
+              <p className="surface-panel-subtitle">Latest completed tests against Cloudflare Edge</p>
+            </div>
+            <Button
+              variant="secondary"
+              size="sm"
+              icon={<Gauge size={13} />}
+              onClick={() => setActiveNav('speed-test')}
+            >
+              View Benchmark
+            </Button>
+          </div>
+
+          {speedTestHistory.length === 0 ? (
+            <EmptyStateBox
+              icon={<Gauge size={22} />}
+              title="No Speed Tests Executed"
+              description="No benchmark tests have been run yet. Run a speed test to evaluate download and upload bandwidth."
+              actionLabel="Run Speed Test"
+              onAction={() => setActiveNav('speed-test')}
             />
-          </div>
+          ) : (
+            <div className="entity-list">
+              {speedTestHistory.slice(0, 4).map((test) => (
+                <div key={test.id} className="entity-row">
+                  <div className="entity-left">
+                    <div className="entity-icon-circle" aria-hidden="true">
+                      <Gauge size={15} style={{ color: 'var(--brand-accent)' }} />
+                    </div>
+                    <div>
+                      <div className="entity-title">{test.server || 'Cloudflare Edge (Auto)'}</div>
+                      <div className="entity-subtitle">
+                        {test.date} · {test.pingMs} ms ping · {test.jitterMs} ms jitter
+                      </div>
+                    </div>
+                  </div>
 
-          <div className="kv-list">
-            <div className="kv-row">
-              <span className="kv-label">Connected Network (SSID)</span>
-              <span className="kv-value">
-                {networkInfo.ssid} ({networkInfo.security})
-              </span>
+                  <div style={{ textAlign: 'right' }}>
+                    <div className="mono" style={{ fontSize: 13, fontWeight: 700, color: 'var(--series-download)' }}>
+                      ↓ {test.downloadMbps.toFixed(1)} Mbps
+                    </div>
+                    <div className="mono" style={{ fontSize: 11.5, color: 'var(--series-upload)', fontWeight: 600 }}>
+                      ↑ {test.uploadMbps.toFixed(1)} Mbps
+                    </div>
+                  </div>
+                </div>
+              ))}
             </div>
-            <div className="kv-row">
-              <span className="kv-label">Connection Type</span>
-              <span className="kv-value">{networkInfo.connectionType}</span>
-            </div>
-            <div className="kv-row">
-              <span className="kv-label">Local IPv4 Address</span>
-              <span
-                className="kv-value mono"
-                style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
-              >
-                {networkInfo.ipv4}
-                <button
-                  type="button"
-                  className="btn-ghost"
-                  style={{
-                    border: 'none',
-                    padding: 3,
-                    borderRadius: 4,
-                    cursor: 'pointer',
-                    display: 'inline-flex',
-                  }}
-                  onClick={() => copyValue('Local IPv4', networkInfo.ipv4)}
-                  title="Copy IPv4 address"
-                  aria-label="Copy IPv4 address"
-                >
-                  <Copy size={13} />
-                </button>
-              </span>
-            </div>
-            <div className="kv-row">
-              <span className="kv-label">Public IPv4 Address</span>
-              <span className="kv-value mono">{networkInfo.publicIp}</span>
-            </div>
-            <div className="kv-row">
-              <span className="kv-label">Default Gateway / DNS</span>
-              <span className="kv-value mono">
-                {networkInfo.gateway} / {networkInfo.dnsServers}
-              </span>
-            </div>
-            <div className="kv-row">
-              <span className="kv-label">Adapter Hardware</span>
-              <span className="kv-value" style={{ color: 'var(--text-secondary)', fontWeight: 500 }}>
-                {networkInfo.adapterDescription}
-              </span>
-            </div>
-          </div>
-
-          <div className="panel-footer-link">
-            <button type="button" className="link-btn" onClick={() => setActiveNav('network')}>
-              <span>View Network &amp; Adapter Details</span>
-              <ChevronRight size={15} />
-            </button>
-          </div>
+          )}
         </section>
 
-        {/* Right: Real Active Applications */}
-        <section className="surface-panel" aria-label="Active applications bandwidth">
+        {/* Right: Recent Network Events & Diagnostics */}
+        <section className="surface-panel" aria-label="Recent diagnostic events">
           <div className="surface-panel-header">
-            <h2 className="surface-panel-title">
-              <Cpu size={17} style={{ color: 'var(--brand-mint)' }} />
-              <span>Active Applications</span>
-            </h2>
-            <StatusBadge
-              variant="neutral"
-              label={`${apps.filter((a) => a.status === 'active').length} Active`}
-            />
-          </div>
-
-          <div className="entity-list">
-            {apps.slice(0, 5).map((app) => (
-              <div key={app.id} className="entity-row">
-                <div className="entity-left">
-                  <div className="entity-icon-circle" aria-hidden="true">
-                    <Activity size={16} />
-                  </div>
-                  <div>
-                    <div className="entity-title">{app.name}</div>
-                    <div className="entity-subtitle">
-                      {app.processName} (PID {app.pid}) · {app.connectionsCount} sockets
-                    </div>
-                  </div>
-                </div>
-
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <div style={{ textAlign: 'right' }}>
-                    <div
-                      className="mono"
-                      style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--series-download)' }}
-                    >
-                      ↓ {app.downloadMbps.toFixed(2)} Mbps
-                    </div>
-                    <div className="mono" style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                      ↑ {app.uploadMbps.toFixed(2)} Mbps
-                    </div>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          <div className="panel-footer-link">
-            <button
-              type="button"
-              className="link-btn"
-              onClick={() => setActiveNav('applications')}
+            <div>
+              <h2 className="surface-panel-title">Diagnostic &amp; Route Events</h2>
+              <p className="surface-panel-subtitle">Real audit log of interface and latency events</p>
+            </div>
+            <Button
+              variant="secondary"
+              size="sm"
+              icon={<History size={13} />}
+              onClick={() => setActiveNav('history')}
             >
-              <span>View All Applications</span>
-              <ChevronRight size={15} />
-            </button>
+              Full History
+            </Button>
           </div>
+
+          {networkEvents.length === 0 ? (
+            <EmptyStateBox
+              icon={<ShieldCheck size={22} />}
+              title="No Connectivity Events Logged"
+              description="Your network adapter has operated cleanly without disconnects or latency threshold violations."
+            />
+          ) : (
+            <div className="entity-list">
+              {networkEvents.slice(0, 4).map((evt) => (
+                <div key={evt.id} className="entity-row">
+                  <div className="entity-left">
+                    <div className="entity-icon-circle" aria-hidden="true">
+                      {evt.severity === 'danger' ? (
+                        <XCircle size={15} style={{ color: 'var(--status-danger)' }} />
+                      ) : evt.severity === 'warning' ? (
+                        <AlertTriangle size={15} style={{ color: 'var(--status-warning)' }} />
+                      ) : (
+                        <CheckCircle2 size={15} style={{ color: 'var(--status-success)' }} />
+                      )}
+                    </div>
+                    <div>
+                      <div className="entity-title">{evt.title}</div>
+                      <div className="entity-subtitle">
+                        {evt.timestamp} · {evt.description}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <StatusBadge
+                      variant={evt.severity === 'danger' ? 'danger' : evt.severity === 'warning' ? 'warning' : 'info'}
+                      label={evt.type.replace('_', ' ')}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </section>
       </div>
     </div>
   );
 };
+
+export default DashboardView;

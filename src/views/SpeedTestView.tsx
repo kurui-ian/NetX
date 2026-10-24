@@ -345,7 +345,7 @@ export const SpeedTestView: React.FC = () => {
                   fontSize: 12,
                   fontWeight: isStepActive ? 700 : 500,
                   background: isStepActive
-                    ? 'rgba(168, 85, 247, 0.18)'
+                    ? 'rgba(14, 165, 233, 0.15)'
                     : isStepDone
                     ? 'rgba(52, 211, 153, 0.12)'
                     : 'transparent',
@@ -400,8 +400,8 @@ export const SpeedTestView: React.FC = () => {
               <svg width="270" height="240" viewBox="0 0 260 250" style={{ overflow: 'visible' }}>
                 <defs>
                   <linearGradient id="gaugeGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-                    <stop offset="0%" stopColor="#c084fc" />
-                    <stop offset="50%" stopColor="#a855f7" />
+                    <stop offset="0%" stopColor="#0ea5e9" />
+                    <stop offset="50%" stopColor="#0284c7" />
                     <stop offset="100%" stopColor="#38bdf8" />
                   </linearGradient>
                   <filter id="gaugeGlow" x="-20%" y="-20%" width="140%" height="140%">
@@ -537,7 +537,7 @@ export const SpeedTestView: React.FC = () => {
                     style={{
                       width: `${progress}%`,
                       transition: 'width 0.3s ease',
-                      background: 'linear-gradient(90deg, #c084fc 0%, #38bdf8 100%)',
+                      background: 'linear-gradient(90deg, #0ea5e9 0%, #38bdf8 100%)',
                     }}
                   />
                 </div>
@@ -584,7 +584,7 @@ export const SpeedTestView: React.FC = () => {
                           borderRadius: '2px 2px 0 0',
                           background:
                             stage === 'download'
-                              ? 'linear-gradient(180deg, #c084fc 0%, rgba(192, 132, 252, 0.2) 100%)'
+                              ? 'linear-gradient(180deg, #0ea5e9 0%, rgba(14, 165, 233, 0.2) 100%)'
                               : 'linear-gradient(180deg, #38bdf8 0%, rgba(56, 189, 248, 0.2) 100%)',
                           transition: 'height 0.2s ease',
                         }}
@@ -612,13 +612,13 @@ export const SpeedTestView: React.FC = () => {
                   borderRadius: 'var(--radius-md)',
                   background:
                     stage === 'download'
-                      ? 'rgba(192, 132, 252, 0.12)'
+                      ? 'rgba(14, 165, 233, 0.12)'
                       : stage === 'transition'
                       ? 'rgba(52, 211, 153, 0.12)'
                       : 'var(--bg-surface-subtle)',
                   border:
                     stage === 'download'
-                      ? '1px solid rgba(192, 132, 252, 0.5)'
+                      ? '1px solid rgba(14, 165, 233, 0.5)'
                       : stage === 'transition'
                       ? '1px solid rgba(52, 211, 153, 0.5)'
                       : '1px solid var(--border-subtle)',
@@ -657,7 +657,7 @@ export const SpeedTestView: React.FC = () => {
                     stage === 'upload'
                       ? 'rgba(56, 189, 248, 0.12)'
                       : stage === 'transition'
-                      ? 'rgba(168, 85, 247, 0.08)'
+                      ? 'rgba(14, 165, 233, 0.08)'
                       : 'var(--bg-surface-subtle)',
                   border:
                     stage === 'upload'
@@ -939,7 +939,7 @@ export const SpeedTestView: React.FC = () => {
                 {sortedHistory.map((item) => {
                   const isChecked = selectedHistoryIds.includes(item.id);
                   return (
-                    <tr key={item.id} style={{ background: isChecked ? 'rgba(168, 85, 247, 0.08)' : undefined }}>
+                    <tr key={item.id} style={{ background: isChecked ? 'rgba(14, 165, 233, 0.08)' : undefined }}>
                       <td>
                         <input
                           type="checkbox"

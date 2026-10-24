@@ -980,7 +980,7 @@ I can scan all nearby Wi-Fi networks, run an internet speed test on Cloudflare E
       {/* 1. Header Toolbar */}
       <div className="surface-card" style={{ padding: '10px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <div style={{ width: 34, height: 34, borderRadius: 8, background: 'var(--brand-soft)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--brand-lilac)' }}>
+          <div style={{ width: 34, height: 34, borderRadius: 8, background: 'var(--brand-soft)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--brand-accent)' }}>
             <Sparkles size={18} />
           </div>
           <div>
@@ -1003,7 +1003,7 @@ I can scan all nearby Wi-Fi networks, run an internet speed test on Cloudflare E
                       ? '#10b981'
                       : settings.aiProvider === 'ollama' && ollamaStatus.online
                       ? '#10b981'
-                      : 'var(--brand-lilac)',
+                      : 'var(--brand-accent)',
                 }}
               >
                 {settings.aiProvider === 'gemini'
@@ -1016,7 +1016,7 @@ I can scan all nearby Wi-Fi networks, run an internet speed test on Cloudflare E
               </span>
             </div>
             <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-              Personalized for <strong style={{ color: 'var(--brand-lilac)' }}>{userName}</strong> · Network Diagnostics &amp; Chat
+              Personalized for <strong style={{ color: 'var(--brand-accent)' }}>{userName}</strong> · Network Diagnostics &amp; Chat
             </div>
           </div>
         </div>
@@ -1075,7 +1075,7 @@ I can scan all nearby Wi-Fi networks, run an internet speed test on Cloudflare E
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  color: 'var(--brand-lilac)',
+                  color: 'var(--brand-accent)',
                   flexShrink: 0,
                   marginTop: 2,
                 }}
@@ -1091,7 +1091,7 @@ I can scan all nearby Wi-Fi networks, run an internet speed test on Cloudflare E
                   borderRadius: msg.role === 'user' ? '14px 14px 2px 14px' : '14px 14px 14px 2px',
                   background:
                     msg.role === 'user'
-                      ? 'linear-gradient(135deg, rgba(139, 92, 246, 0.95), rgba(168, 85, 247, 0.95))'
+                      ? 'linear-gradient(135deg, #0284c7 0%, #0ea5e9 100%)'
                       : 'var(--bg-surface-elevated)',
                   border: msg.role === 'user' ? 'none' : '1px solid var(--border-default)',
                   color: msg.role === 'user' ? '#ffffff' : 'var(--text-primary)',
@@ -1115,7 +1115,7 @@ I can scan all nearby Wi-Fi networks, run an internet speed test on Cloudflare E
                     {msg.toolExecution.result.networks.slice(0, 6).map((net: any) => (
                       <div key={net.bssid || net.ssid} className="wifi-quick-card">
                         <div className="wifi-quick-left">
-                          <Wifi size={15} style={{ color: net.connected ? 'var(--status-success)' : 'var(--brand-lilac)' }} />
+                          <Wifi size={15} style={{ color: net.connected ? 'var(--status-success)' : 'var(--brand-accent)' }} />
                           <div>
                             <div className="wifi-quick-name">
                               {net.ssid}
@@ -1161,7 +1161,7 @@ I can scan all nearby Wi-Fi networks, run an internet speed test on Cloudflare E
                     }}
                   >
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, fontSize: '0.80rem', color: 'var(--brand-lilac)' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, fontSize: '0.80rem', color: 'var(--brand-accent)' }}>
                         <Gauge size={15} />
                         <span>VERIFIED SPEED TEST METRICS</span>
                       </div>
@@ -1204,10 +1204,10 @@ I can scan all nearby Wi-Fi networks, run an internet speed test on Cloudflare E
                         }}
                       >
                         <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: '0.72rem', color: 'var(--text-secondary)', fontWeight: 600 }}>
-                          <Upload size={13} style={{ color: '#c084fc' }} />
+                          <Upload size={13} style={{ color: 'var(--series-download)' }} />
                           <span>UPLOAD</span>
                         </div>
-                        <div style={{ fontSize: '1.28rem', fontWeight: 800, color: '#c084fc' }}>
+                        <div style={{ fontSize: '1.28rem', fontWeight: 800, color: 'var(--series-download)' }}>
                           {msg.toolExecution.result.uploadMbps ?? '--'}
                           <span style={{ fontSize: '0.72rem', fontWeight: 600, marginLeft: 3 }}>Mbps</span>
                         </div>
@@ -1225,7 +1225,7 @@ I can scan all nearby Wi-Fi networks, run an internet speed test on Cloudflare E
                         }}
                       >
                         <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: '0.72rem', color: 'var(--text-secondary)', fontWeight: 600 }}>
-                          <Activity size={13} style={{ color: 'var(--brand-lilac)' }} />
+                          <Activity size={13} style={{ color: 'var(--brand-accent)' }} />
                           <span>LATENCY</span>
                         </div>
                         <div style={{ fontSize: '1.28rem', fontWeight: 800, color: 'var(--text-primary)' }}>
@@ -1256,7 +1256,7 @@ I can scan all nearby Wi-Fi networks, run an internet speed test on Cloudflare E
                       gap: 8,
                     }}
                   >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, fontSize: '0.80rem', color: 'var(--brand-lilac)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, fontSize: '0.80rem', color: 'var(--brand-accent)' }}>
                       <ShieldCheck size={15} />
                       <span>DIAGNOSTIC VERIFICATION STAGES</span>
                     </div>
@@ -1305,7 +1305,7 @@ I can scan all nearby Wi-Fi networks, run an internet speed test on Cloudflare E
                   }}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700, fontSize: '0.85rem', marginBottom: 6 }}>
-                    <Lock size={15} style={{ color: 'var(--brand-lilac)' }} />
+                    <Lock size={15} style={{ color: 'var(--brand-accent)' }} />
                     <span>Enter Password for "{msg.requiresPassword.ssid}"</span>
                   </div>
                   <div style={{ display: 'flex', gap: 8 }}>
@@ -1371,9 +1371,9 @@ I can scan all nearby Wi-Fi networks, run an internet speed test on Cloudflare E
                         display: 'flex',
                         alignItems: 'center',
                         gap: 6,
-                        background: 'rgba(139, 92, 246, 0.1)',
-                        borderColor: 'rgba(139, 92, 246, 0.3)',
-                        color: 'var(--brand-lilac)',
+                        background: 'rgba(14, 165, 233, 0.12)',
+                        borderColor: 'rgba(14, 165, 233, 0.3)',
+                        color: 'var(--brand-accent)',
                         fontWeight: 600,
                       }}
                     >

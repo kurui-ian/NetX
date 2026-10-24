@@ -17,3 +17,8 @@ src-tauri/target/
 *.log
 .DS_Store
 Thumbs.db
+
+# Test & Automation artifacts
+.playwright-cli/
+.taste-skill/
+tests/screenshots/

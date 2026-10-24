@@ -26,40 +26,40 @@ import { StatusBadge } from '../ui/Primitives';
 
 const PAGE_META: Record<NavSection, { title: string; subtitle: string }> = {
   dashboard: {
-    title: 'Network Overview',
-    subtitle: 'Real-time connection status, throughput performance, and telemetry.',
+    title: 'Overview',
+    subtitle: 'Real-time connection health, live bandwidth telemetry, and adapter performance.',
   },
   'ai-assistant': {
-    title: 'NetX AI Assistant',
-    subtitle: 'Local neural network operations, diagnostics & automated troubleshooting.',
+    title: 'AI Troubleshooter',
+    subtitle: 'Automated diagnostic reasoning, root cause analysis, and guided network repair.',
   },
   'speed-test': {
     title: 'Speed Test',
-    subtitle: 'Measure your download speed, upload speed, and network latency.',
+    subtitle: 'Measure download throughput, upload rate, and latency against Cloudflare edge servers.',
   },
   'data-usage': {
     title: 'Data Usage',
-    subtitle: 'Track daily, weekly, and monthly bandwidth consumption across your PC.',
+    subtitle: 'Track daily, monthly, and process-level bandwidth consumption across your PC.',
   },
   applications: {
     title: 'Applications',
-    subtitle: 'Monitor active processes and per-application bandwidth usage.',
+    subtitle: 'Monitor active processes and per-application bandwidth utilization.',
   },
   connections: {
-    title: 'Active Connections',
-    subtitle: 'Inspect live TCP and UDP endpoints and remote hostnames.',
+    title: 'Active Sockets',
+    subtitle: 'Inspect live TCP and UDP endpoints, remote hostnames, and established connections.',
   },
   wifi: {
-    title: 'Wi-Fi Environment',
-    subtitle: 'Signal quality, wireless link parameters, and nearby access points.',
+    title: 'Wi-Fi Spectrum',
+    subtitle: 'Signal quality, wireless link parameters, channel distribution, and nearby access points.',
   },
   network: {
-    title: 'Local Network & Adapters',
-    subtitle: 'Connected LAN devices on your subnet and local network interface hardware.',
+    title: 'Connection Details',
+    subtitle: 'Hardware network interface specifications, IPv4/IPv6 routing, and local LAN devices.',
   },
   gaming: {
     title: 'Gaming & Latency Quality',
-    subtitle: 'High-frequency ping tracking, jitter analysis, packet loss monitor, and stability scoring.',
+    subtitle: 'High-frequency jitter analysis, packet loss monitor, and stability scoring.',
   },
   tools: {
     title: 'Network Tools',
@@ -67,15 +67,15 @@ const PAGE_META: Record<NavSection, { title: string; subtitle: string }> = {
   },
   diagnostics: {
     title: 'Network Diagnostics',
-    subtitle: 'Automated step-by-step connection health verification and troubleshooting.',
+    subtitle: 'Automated 4-stage health verification: Adapter, Gateway, DNS, and WAN Internet.',
   },
   history: {
-    title: 'Incident & Event History',
-    subtitle: 'Audit trail of connectivity drops, latency excursions, and interface state changes.',
+    title: 'Reports & History',
+    subtitle: 'Audit trail of connectivity events, speed benchmarks, and diagnostic logs.',
   },
   settings: {
     title: 'Settings',
-    subtitle: 'Configure appearance, startup behavior, notifications, and data retention.',
+    subtitle: 'Display theme, telemetry sampling rates, notifications, and AI configuration.',
   },
 };
 
@@ -100,6 +100,7 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
     settings,
     updateSettings,
     connected,
+    internetReachable,
     networkInfo,
     currentDownloadMbps,
     currentUploadMbps,
@@ -122,14 +123,14 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const meta = PAGE_META[activeNav];
+  const meta = PAGE_META[activeNav] || PAGE_META.dashboard;
 
   const cycleTheme = () => {
     const order: AppearanceMode[] = ['dark', 'light', 'system'];
     const next = order[(order.indexOf(settings.appearance) + 1) % order.length];
     updateSettings({ appearance: next });
     pushToast(
-      `Appearance set to ${next === 'dark' ? 'Cosmic Dark' : next.charAt(0).toUpperCase() + next.slice(1)} mode.`,
+      `Appearance set to ${next === 'dark' ? 'Dark' : next === 'light' ? 'Light' : 'System'} mode.`,
       'info'
     );
   };
@@ -140,6 +141,16 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
     return <Laptop size={15} />;
   };
 
+  const connectionStatus = !connected
+    ? 'Disconnected'
+    : !internetReachable
+    ? 'Limited Connectivity'
+    : networkInfo.hostname === 'Loading...'
+    ? 'Checking Connection'
+    : 'Connected';
+
+  const dotState = !connected ? 'offline' : !internetReachable ? 'limited' : 'online';
+
   return (
     <header className="top-header">
       {/* Left: View Title & Subtitle */}
@@ -148,39 +159,45 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
         <p className="header-subtitle">{meta.subtitle}</p>
       </div>
 
-      {/* Center: Search & Command Bar (Matches Search ChatGPT ⌘K in inspiration) */}
+      {/* Center: Search & Command Bar (Ctrl + K) */}
       <div className="header-search-wrap" onClick={onOpenCommandPalette} role="search">
         <Search size={15} className="header-search-icon" />
-        <span className="header-search-placeholder">Search NetX or jump to tool...</span>
+        <span className="header-search-placeholder">Search network tools, commands...</span>
         <kbd className="header-search-kbd">Ctrl K</kbd>
       </div>
 
       {/* Right: Controls & Actions */}
       <div className="header-controls">
-        {/* Quick Action Pill Button: + Speed Test (Matches + New Chat in inspiration) */}
+        {/* Quick Speed Test Trigger */}
         <button
           type="button"
           className="header-action-btn"
           onClick={() => setActiveNav('speed-test')}
-          title="Run a quick Cloudflare Speed Test"
+          title="Run an instant internet speed benchmark"
         >
-          <Plus size={14} strokeWidth={2.6} />
+          <Gauge size={14} />
           <span>Speed Test</span>
         </button>
 
         {/* Real Connection Status Pill */}
         <div
           className="header-connection-pill"
-          aria-label="Current network connection"
-          onClick={() => setActiveNav('wifi')}
+          aria-label={`Current network status: ${connectionStatus}`}
+          onClick={() => setActiveNav('network')}
           role="button"
           tabIndex={0}
-          title="Click to view Wi-Fi spectrum and link details"
+          title={`Status: ${connectionStatus} · Click for connection details`}
         >
-          <div className={`header-live-dot ${connected ? 'online' : 'offline'}`} />
+          <div className={`header-live-dot ${dotState}`} />
           <div className="header-connection-info">
-            <span className="header-connection-ssid">{networkInfo.ssid}</span>
-            <span className="header-connection-ip mono">{networkInfo.ipv4}</span>
+            <span className="header-connection-ssid">
+              {networkInfo.ssid && networkInfo.ssid !== 'Disconnected'
+                ? networkInfo.ssid
+                : networkInfo.interfaceName || connectionStatus}
+            </span>
+            <span className="header-connection-ip mono">
+              {networkInfo.ipv4 !== '—' ? networkInfo.ipv4 : connectionStatus}
+            </span>
           </div>
         </div>
 
@@ -213,7 +230,7 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
           type="button"
           className="header-icon-btn"
           onClick={cycleTheme}
-          title={`Appearance: ${settings.appearance} (Click to switch)`}
+          title={`Appearance: ${settings.appearance} (Click to toggle)`}
           aria-label={`Appearance mode: ${settings.appearance}`}
         >
           {getThemeIcon()}
@@ -235,7 +252,7 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
           {trayOpen && (
             <div className="tray-popover" role="menu" aria-label="System Tray Menu">
               <div className="tray-popover-header">
-                <span className="tray-popover-title">NetX Pro Engine</span>
+                <span className="tray-popover-title">NetX Operations</span>
                 <StatusBadge
                   variant={monitoringPaused ? 'warning' : 'success'}
                   label={monitoringPaused ? 'Paused' : 'Active'}
@@ -302,26 +319,25 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
                 role="menuitem"
                 className="tray-menu-item"
                 onClick={() => {
-                  setActiveNav('settings');
+                  setActiveNav('speed-test');
                   setTrayOpen(false);
                 }}
               >
-                <span>Settings</span>
-                <Settings size={14} />
+                <span>Speed Test</span>
+                <Gauge size={14} />
               </button>
 
               <button
                 type="button"
                 role="menuitem"
-                className="tray-menu-item tray-exit"
+                className="tray-menu-item"
                 onClick={() => {
-                  if (window.netxNative) {
-                    window.netxNative.quitApp();
-                  }
+                  setActiveNav('settings');
+                  setTrayOpen(false);
                 }}
               >
-                <span>Exit NetX</span>
-                <Power size={14} />
+                <span>Preferences</span>
+                <Settings size={14} />
               </button>
             </div>
           )}
@@ -330,3 +346,5 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
     </header>
   );
 };
+
+export default TopHeader;

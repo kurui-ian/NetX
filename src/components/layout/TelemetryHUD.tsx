@@ -85,13 +85,13 @@ export const TelemetryHUD: React.FC<TelemetryHUDProps> = ({ isOpen, onClose }) =
       <svg viewBox={`0 0 ${width} ${height}`} className="hud-sparkline-svg" aria-hidden="true">
         <defs>
           <linearGradient id="hud-spark-line" x1="0" y1="0" x2="1" y2="0">
-            <stop offset="0%" stopColor="#a855f7" />
-            <stop offset="50%" stopColor="#c084fc" />
-            <stop offset="100%" stopColor="#818cf8" />
+            <stop offset="0%" stopColor="#0284c7" />
+            <stop offset="50%" stopColor="#0ea5e9" />
+            <stop offset="100%" stopColor="#38bdf8" />
           </linearGradient>
           <linearGradient id="hud-spark-area" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="rgba(168, 85, 247, 0.45)" />
-            <stop offset="100%" stopColor="rgba(168, 85, 247, 0.0)" />
+            <stop offset="0%" stopColor="rgba(14, 165, 233, 0.22)" />
+            <stop offset="100%" stopColor="rgba(14, 165, 233, 0.0)" />
           </linearGradient>
         </defs>
         <path d={areaD} fill="url(#hud-spark-area)" />
@@ -124,62 +124,25 @@ export const TelemetryHUD: React.FC<TelemetryHUDProps> = ({ isOpen, onClose }) =
 
         {/* 3D Glass Orbs & Isometric Floating Layers Illustration */}
         <div className="hud-3d-graphic" aria-hidden="true">
-          <svg viewBox="0 0 200 130" className="hud-3d-svg">
+          <svg viewBox="0 0 200 115" className="hud-3d-svg">
             <defs>
-              <linearGradient id="sphereGrad" x1="30%" y1="20%" x2="70%" y2="90%">
-                <stop offset="0%" stopColor="#f3e8ff" />
-                <stop offset="40%" stopColor="#c084fc" />
-                <stop offset="75%" stopColor="#7c3aed" />
-                <stop offset="100%" stopColor="#3b0764" />
+              <linearGradient id="coreGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stopColor="#38bdf8" />
+                <stop offset="50%" stopColor="#0ea5e9" />
+                <stop offset="100%" stopColor="#0284c7" />
               </linearGradient>
-              <linearGradient id="plateGrad1" x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="0%" stopColor="rgba(192, 132, 252, 0.45)" />
-                <stop offset="100%" stopColor="rgba(124, 58, 237, 0.15)" />
+              <linearGradient id="gridGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stopColor="rgba(56, 189, 248, 0.35)" />
+                <stop offset="100%" stopColor="rgba(2, 132, 199, 0.06)" />
               </linearGradient>
-              <linearGradient id="plateGrad2" x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="0%" stopColor="rgba(216, 180, 254, 0.6)" />
-                <stop offset="100%" stopColor="rgba(99, 102, 241, 0.2)" />
-              </linearGradient>
-              <filter id="glowFilter" x="-30%" y="-30%" width="160%" height="160%">
-                <feGaussianBlur stdDeviation="8" result="blur" />
-                <feComposite in="SourceGraphic" in2="blur" operator="over" />
-              </filter>
             </defs>
-
-            {/* Glowing purple ambient aura */}
-            <circle cx="100" cy="65" r="45" fill="rgba(168, 85, 247, 0.3)" filter="url(#glowFilter)" />
-
-            {/* Bottom isometric glass plate */}
-            <polygon
-              points="100,88 158,104 100,120 42,104"
-              fill="url(#plateGrad1)"
-              stroke="rgba(255, 255, 255, 0.35)"
-              strokeWidth="1"
-            />
-            <polygon
-              points="100,74 152,88 100,102 48,88"
-              fill="url(#plateGrad2)"
-              stroke="rgba(255, 255, 255, 0.5)"
-              strokeWidth="1"
-            />
-            <polygon
-              points="100,60 144,72 100,84 56,72"
-              fill="url(#plateGrad1)"
-              stroke="rgba(255, 255, 255, 0.6)"
-              strokeWidth="1"
-            />
-
-            {/* Glossy 3D Purple Floating Sphere */}
-            <circle
-              cx="100"
-              cy="48"
-              r="22"
-              fill="url(#sphereGrad)"
-              filter="drop-shadow(0px 8px 16px rgba(124, 58, 237, 0.6))"
-            />
-            {/* Sphere Specular Highlight */}
-            <ellipse cx="94" cy="40" rx="7" ry="4" fill="rgba(255, 255, 255, 0.85)" transform="rotate(-20 94 40)" />
-            <circle cx="98" cy="38" r="2" fill="#ffffff" />
+            <circle cx="100" cy="55" r="38" fill="rgba(14, 165, 233, 0.12)" />
+            <polygon points="100,78 152,94 100,108 48,94" fill="url(#gridGrad)" stroke="rgba(56, 189, 248, 0.3)" strokeWidth="1" />
+            <polygon points="100,64 146,78 100,90 54,78" fill="url(#gridGrad)" stroke="rgba(56, 189, 248, 0.45)" strokeWidth="1" />
+            <polygon points="100,50 140,62 100,74 60,62" fill="url(#gridGrad)" stroke="rgba(56, 189, 248, 0.6)" strokeWidth="1" />
+            <circle cx="100" cy="40" r="14" fill="url(#coreGrad)" stroke="rgba(255, 255, 255, 0.6)" strokeWidth="1.5" />
+            <circle cx="96" cy="36" r="3" fill="#ffffff" opacity="0.8" />
+            <circle cx="100" cy="40" r="20" fill="none" stroke="rgba(56, 189, 248, 0.4)" strokeWidth="1" strokeDasharray="3 3" />
           </svg>
         </div>
 

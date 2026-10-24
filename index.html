@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -9,7 +9,7 @@
     <script>
       {
         try {
-          const saved = localStorage.getItem('netx-theme') || 'system';
+          const saved = localStorage.getItem('netx-theme') || 'dark';
           const meta = document.querySelector('meta[name="color-scheme"]');
           const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
           const resolved = saved === 'system' ? (prefersDark ? 'dark' : 'light') : saved;
