@@ -1,5 +1,10 @@
 import { matchConversationalIntent, matchUserIntent } from '../src/services/intentMatcher';
-import { getGeminiToolsDeclaration } from '../src/services/geminiClient';
+import {
+  getGeminiToolsDeclaration,
+  DEFAULT_GEMINI_API_KEY,
+  DEFAULT_GEMINI_MODEL,
+  testGeminiApiKey,
+} from '../src/services/geminiClient';
 
 function assert(condition: boolean, msg: string) {
   if (!condition) {
@@ -48,6 +53,14 @@ async function runConversationalTests() {
   assert(decls.length === 16, `Exported all 16 tool declarations for Gemini (found ${decls.length})`);
   assert(decls.some(d => d.name === 'connect_wifi'), 'Gemini declaration contains "connect_wifi"');
   assert(decls.some(d => d.name === 'list_wifi_networks'), 'Gemini declaration contains "list_wifi_networks"');
+
+  console.log('\n--- 4. Testing Permanent Gemini API Key & Live Connectivity ---');
+
+  assert(Boolean(DEFAULT_GEMINI_API_KEY && DEFAULT_GEMINI_API_KEY.startsWith('AQ.')), 'Permanent Gemini API key embedded');
+  assert(DEFAULT_GEMINI_MODEL === 'gemini-flash-latest', 'Default model configured as gemini-flash-latest');
+
+  const keyCheck = await testGeminiApiKey(DEFAULT_GEMINI_API_KEY, DEFAULT_GEMINI_MODEL);
+  assert(keyCheck.ok === true, `Live Gemini API key validated successfully with Google (error: ${keyCheck.error})`);
 
   console.log('\n🎉 ALL CONVERSATIONAL & WI-FI SUITE TESTS PASSED!\n');
 }

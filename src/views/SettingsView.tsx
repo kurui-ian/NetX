@@ -236,7 +236,7 @@ export const SettingsView: React.FC = () => {
                   }
                   label={
                     settings.aiProvider === 'gemini'
-                      ? (settings.geminiApiKey ? 'Gemini 1.5 Flash (Cloud)' : 'Gemini Key Needed')
+                      ? (settings.geminiApiKey ? 'Gemini Flash (Active)' : 'Gemini Key Needed')
                       : settings.aiProvider === 'ollama'
                       ? (ollamaTestResult?.online ? 'Ollama Online' : 'Local Ollama')
                       : 'Offline Native'
@@ -376,7 +376,7 @@ export const SettingsView: React.FC = () => {
                     </div>
 
                     <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0, lineHeight: 1.45 }}>
-                      Google Gemini 1.5 Flash provides free, lightning-fast ChatGPT-like intelligence. It operates with zero local RAM footprint on your computer and can control Wi-Fi, speed testing, and network diagnostics natively.
+                      Google Gemini Flash provides free, lightning-fast ChatGPT-like intelligence. It operates with zero local RAM footprint on your computer and can control Wi-Fi, speed testing, and network diagnostics natively.
                     </p>
 
                     {/* Gemini API Key */}
@@ -482,11 +482,11 @@ export const SettingsView: React.FC = () => {
                       <div>
                         <div style={{ fontWeight: 600, fontSize: 13 }}>Cloud Model</div>
                         <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
-                          Gemini 1.5 Flash recommended for fastest tool call latency.
+                          Gemini Flash recommended for ultra-fast response and network diagnostics.
                         </div>
                       </div>
                       <select
-                        value={settings.geminiModel || 'gemini-1.5-flash'}
+                        value={settings.geminiModel || 'gemini-flash-latest'}
                         onChange={(e) => updateSettings({ geminiModel: e.target.value })}
                         style={{
                           padding: '6px 10px',
@@ -495,12 +495,12 @@ export const SettingsView: React.FC = () => {
                           border: '1px solid var(--border-subtle)',
                           borderRadius: 'var(--radius-sm)',
                           color: 'var(--text-primary)',
-                          width: 200,
+                          width: 220,
                         }}
                       >
-                        <option value="gemini-1.5-flash">gemini-1.5-flash (Recommended)</option>
-                        <option value="gemini-2.0-flash">gemini-2.0-flash (Fast)</option>
-                        <option value="gemini-1.5-pro">gemini-1.5-pro (High Reasoning)</option>
+                        <option value="gemini-flash-latest">gemini-flash-latest (Recommended)</option>
+                        <option value="gemini-3.5-flash">gemini-3.5-flash (Stable Flash)</option>
+                        <option value="gemini-pro-latest">gemini-pro-latest (High Reasoning)</option>
                       </select>
                     </div>
                   </div>

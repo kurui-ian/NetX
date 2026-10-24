@@ -15,6 +15,7 @@ import {
   UsageStoreData,
   WifiNetworkItem,
 } from '../types/netx';
+import { DEFAULT_GEMINI_API_KEY, DEFAULT_GEMINI_MODEL } from '../services/geminiClient';
 
 const DEFAULT_SETTINGS: NetXSettings = {
   appearance: 'system',
@@ -28,8 +29,8 @@ const DEFAULT_SETTINGS: NetXSettings = {
   preferredInterface: 'Primary Active Interface',
   telemetryLocalOnly: true,
   aiProvider: 'gemini',
-  geminiApiKey: '',
-  geminiModel: 'gemini-1.5-flash',
+  geminiApiKey: DEFAULT_GEMINI_API_KEY,
+  geminiModel: 'gemini-flash-latest',
   ollamaUrl: 'http://127.0.0.1:11434',
   ollamaModel: 'llama3.2',
   aiTemperature: 0.4,
@@ -120,9 +121,21 @@ export const NetXProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const savedSettings = localStorage.getItem('netx-settings-v2');
       const savedTheme = localStorage.getItem('netx-theme') as AppearanceMode | null;
       const parsed = savedSettings ? JSON.parse(savedSettings) : {};
+      const geminiApiKey =
+        parsed.geminiApiKey && parsed.geminiApiKey.trim()
+          ? parsed.geminiApiKey.trim()
+          : DEFAULT_SETTINGS.geminiApiKey;
+      const geminiModel =
+        parsed.geminiModel &&
+        parsed.geminiModel !== 'gemini-1.5-flash' &&
+        parsed.geminiModel !== 'gemini-2.0-flash'
+          ? parsed.geminiModel
+          : DEFAULT_SETTINGS.geminiModel;
       return {
         ...DEFAULT_SETTINGS,
         ...parsed,
+        geminiApiKey,
+        geminiModel,
         appearance: savedTheme || parsed.appearance || 'system',
       };
     } catch {

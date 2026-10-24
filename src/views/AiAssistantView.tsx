@@ -49,6 +49,8 @@ import {
   sendGeminiChat,
   GeminiChatTurn,
   testGeminiApiKey,
+  DEFAULT_GEMINI_API_KEY,
+  DEFAULT_GEMINI_MODEL,
 } from '../services/geminiClient';
 import {
   NETX_AI_TOOLS,
@@ -342,7 +344,8 @@ How can I help you today? Feel free to ask anything or tap one of the quick sugg
     // ========================================================================
     // PATH 1: Google Gemini Free Cloud AI (Recommended)
     // ========================================================================
-    if (settings.aiProvider === 'gemini' && settings.geminiApiKey?.trim()) {
+    const activeGeminiKey = (settings.geminiApiKey && settings.geminiApiKey.trim()) || DEFAULT_GEMINI_API_KEY;
+    if (settings.aiProvider === 'gemini' && activeGeminiKey) {
       try {
         setRunningActionStatus('Thinking with Google Gemini...');
 
@@ -361,8 +364,8 @@ How can I help you today? Feel free to ask anything or tap one of the quick sugg
         });
 
         const geminiRes = await sendGeminiChat(
-          settings.geminiApiKey,
-          settings.geminiModel || 'gemini-1.5-flash',
+          activeGeminiKey,
+          settings.geminiModel || DEFAULT_GEMINI_MODEL,
           geminiHistory,
           settings.aiTemperature
         );
@@ -427,7 +430,7 @@ How can I help you today? Feel free to ask anything or tap one of the quick sugg
                 parts: geminiRes.rawParts || [{ functionCall: { name: toolName, args: toolArgs } }],
               },
               {
-                role: 'function',
+                role: 'user',
                 parts: [
                   {
                     functionResponse: {
@@ -440,8 +443,8 @@ How can I help you today? Feel free to ask anything or tap one of the quick sugg
             ];
 
             const secondRes = await sendGeminiChat(
-              settings.geminiApiKey,
-              settings.geminiModel || 'gemini-1.5-flash',
+              activeGeminiKey,
+              settings.geminiModel || DEFAULT_GEMINI_MODEL,
               followUpTurns,
               settings.aiTemperature
             );
