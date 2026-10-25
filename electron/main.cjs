@@ -718,14 +718,70 @@ ipcMain.handle('netx:get-connections-and-apps', async () => {
   }
 });
 
+// Active hardware trigger for Wi-Fi spectrum channel probe sweep (WlanScan via wlanapi.dll)
+async function triggerHardwareWifiScan() {
+  const exePath = path.join(__dirname, '..', 'bin', 'wlanscan.exe');
+  if (fs.existsSync(exePath)) {
+    try {
+      await execAsync(`"${exePath}"`, { timeout: 2000 });
+      return true;
+    } catch {
+      // fallback
+    }
+  }
+
+  // PowerShell fallback using Win32 WlanScan
+  try {
+    const psCmd = `
+Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+public class WScan {
+  [DllImport("wlanapi.dll")] public static extern int WlanOpenHandle(uint v, IntPtr r, out uint nv, out IntPtr h);
+  [DllImport("wlanapi.dll")] public static extern int WlanCloseHandle(IntPtr h, IntPtr r);
+  [DllImport("wlanapi.dll")] public static extern int WlanEnumInterfaces(IntPtr h, IntPtr r, out IntPtr p);
+  [DllImport("wlanapi.dll")] public static extern int WlanScan(IntPtr h, ref Guid g, IntPtr s, IntPtr e, IntPtr r);
+  [DllImport("wlanapi.dll")] public static extern void WlanFreeMemory(IntPtr p);
+  public static void Run() {
+    IntPtr h; uint nv;
+    if (WlanOpenHandle(2, IntPtr.Zero, out nv, out h) == 0) {
+      IntPtr p;
+      if (WlanEnumInterfaces(h, IntPtr.Zero, out p) == 0 && p != IntPtr.Zero) {
+        int cnt = Marshal.ReadInt32(p);
+        for (int i=0; i<cnt; i++) {
+          byte[] b = new byte[16]; Marshal.Copy(new IntPtr(p.ToInt64() + 8 + i*532), b, 0, 16);
+          Guid g = new Guid(b); WlanScan(h, ref g, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero);
+        }
+        WlanFreeMemory(p);
+      }
+      WlanCloseHandle(h, IntPtr.Zero);
+    }
+  }
+}
+"@ -Language CSharp; [WScan]::Run()
+`;
+    await execAsync(`powershell -NoProfile -Command "${psCmd.replace(/\r?\n/g, ' ')}"`, { timeout: 3500 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // ============================================================================
 // IPC 3: Real Wi-Fi Spectrum Scanner (`netx:scan-wifi`)
 // ============================================================================
-ipcMain.handle('netx:scan-wifi', async () => {
+ipcMain.handle('netx:scan-wifi', async (_event, rescan = true) => {
   try {
+    // If rescan is requested or default, trigger native hardware probe sweep
+    if (rescan !== false) {
+      await triggerHardwareWifiScan();
+      // Allow wireless card hardware to complete channel sweep and broadcast probes (800ms)
+      await new Promise((r) => setTimeout(r, 800));
+    }
+
     const [currentInfo, { stdout }] = await Promise.all([
       getWifiInterfaceInfo(),
-      execAsync('netsh wlan show networks mode=bssid', { timeout: 3500 }),
+      execAsync('netsh wlan show networks mode=bssid', { timeout: 4000 }),
     ]);
 
     const networks = [];

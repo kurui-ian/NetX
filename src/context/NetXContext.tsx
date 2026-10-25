@@ -441,6 +441,15 @@ export const NetXProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => clearInterval(timer);
   }, [monitoringPaused, refreshConnectionsAndApps]);
 
+  // Periodic Wi-Fi Airwaves Scanner (auto-scans nearby wireless networks every 15s)
+  useEffect(() => {
+    if (monitoringPaused) return;
+    const timer = setInterval(() => {
+      refreshWifi();
+    }, 15000);
+    return () => clearInterval(timer);
+  }, [monitoringPaused, refreshWifi]);
+
   // Compute per-application live bandwidth & usage attribution based on active sockets
   const totalEstablished = Math.max(
     1,

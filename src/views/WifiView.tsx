@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Radio, RefreshCw, ShieldCheck, Signal, Wifi } from 'lucide-react';
 import { useNetX } from '../context/NetXContext';
 import { Button, MetricTile, StatusBadge } from '../components/ui/Primitives';
@@ -13,6 +13,14 @@ export const WifiView: React.FC = () => {
     setScanning(false);
     pushToast(`Wi-Fi spectrum scan complete (${wifiNetworks.length} BSSIDs detected).`, 'success');
   };
+
+  useEffect(() => {
+    handleRescan();
+    const timer = setInterval(() => {
+      refreshWifi();
+    }, 10000);
+    return () => clearInterval(timer);
+  }, []);
 
   return (
     <div className="page-container">
