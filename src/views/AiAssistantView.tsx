@@ -306,6 +306,13 @@ ${result?.error || 'Failed to authenticate. Please ensure the security key is co
     }
   }
 
+  const activeGeminiKey = (settings.geminiApiKey && settings.geminiApiKey.trim()) || DEFAULT_GEMINI_API_KEY;
+  const canUseGemini =
+    settings.aiProvider !== 'ollama' &&
+    settings.aiProvider !== 'offline' &&
+    Boolean(activeGeminiKey) &&
+    internetReachable;
+
   // Execute a Tool Safely and return structured results
   const executeToolSafely = async (
     toolDef: ToolDefinition,
@@ -416,6 +423,102 @@ ${result?.error || 'Failed to authenticate. Please ensure the security key is co
     }
   };
 
+  const handleConfirmToolExecution = async (messageId: string) => {
+    const targetMsg = messages.find((m) => m.id === messageId);
+    if (!targetMsg || !targetMsg.toolExecution) return;
+
+    const toolDef = findToolByName(targetMsg.toolExecution.toolName);
+    if (!toolDef) return;
+
+    setIsProcessing(true);
+    setRunningActionStatus(`Executing ${toolDef.displayName}...`);
+
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.id === messageId && m.toolExecution
+          ? {
+              ...m,
+              content: `Executing **${toolDef.displayName}**...`,
+              toolExecution: {
+                ...m.toolExecution,
+                status: 'running',
+              },
+            }
+          : m
+      )
+    );
+
+    try {
+      const toolResult = await executeToolSafely(toolDef, targetMsg.toolExecution.args, messageId);
+
+      // If online with Gemini, synthesize conversational synthesis
+      if (canUseGemini) {
+        setRunningActionStatus('Synthesizing verified results with Gemini...');
+        try {
+          const followUpTurns: GeminiChatTurn[] = [
+            ...messages
+              .filter((m) => m.role === 'user' || m.role === 'assistant')
+              .slice(-6)
+              .map((m) => ({
+                role: (m.role === 'user' ? 'user' : 'model') as 'user' | 'model',
+                parts: [{ text: m.content }],
+              })),
+            {
+              role: 'user',
+              parts: [
+                {
+                  functionResponse: {
+                    name: toolDef.name,
+                    response: { output: toolResult },
+                  },
+                },
+              ],
+            },
+          ];
+
+          const secondRes = await sendGeminiChat(
+            activeGeminiKey,
+            settings.geminiModel || DEFAULT_GEMINI_MODEL,
+            followUpTurns,
+            settings.aiTemperature
+          );
+
+          if (secondRes.ok && secondRes.text) {
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === messageId ? { ...m, content: secondRes.text! } : m
+              )
+            );
+          }
+        } catch {
+          // Native summary text is already set by executeToolSafely
+        }
+      }
+    } catch (err: any) {
+      console.error('Confirmation tool execution error:', err);
+    } finally {
+      setIsProcessing(false);
+      setRunningActionStatus(null);
+    }
+  };
+
+  const handleCancelToolExecution = (messageId: string) => {
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.id === messageId && m.toolExecution
+          ? {
+              ...m,
+              content: `Execution of **${m.toolExecution.displayName}** was cancelled.`,
+              toolExecution: {
+                ...m.toolExecution,
+                status: 'cancelled',
+              },
+            }
+          : m
+      )
+    );
+  };
+
   // User submits prompt
   const handleSendMessage = async (textToSend?: string) => {
     const query = (textToSend || inputQuery).trim();
@@ -433,6 +536,26 @@ ${result?.error || 'Failed to authenticate. Please ensure the security key is co
     };
 
     setMessages((prev) => [...prev, userMsg]);
+
+    // Check for Pending Action Confirmation ("yes", "confirm", "proceed", "cancel", etc.)
+    const pendingConfirmMsg = [...messages].reverse().find(
+      (m) => m.toolExecution?.status === 'confirming'
+    );
+
+    if (pendingConfirmMsg && pendingConfirmMsg.toolExecution) {
+      const lowerQuery = query.toLowerCase().trim();
+      const isAffirmative = /^(yes|y|confirm|confirmed|proceed|go ahead|do it|sure|ok|okay|run it|continue|execute|flush)/i.test(lowerQuery);
+      const isNegative = /^(no|n|cancel|cancelled|stop|abort|don't|dont|nevermind|quit)/i.test(lowerQuery);
+
+      if (isAffirmative) {
+        await handleConfirmToolExecution(pendingConfirmMsg.id);
+        return;
+      } else if (isNegative) {
+        handleCancelToolExecution(pendingConfirmMsg.id);
+        return;
+      }
+    }
+
     setIsProcessing(true);
     setRunningActionStatus('NetX AI is thinking...');
 
@@ -513,12 +636,7 @@ ${result?.error || 'Failed to authenticate. Please ensure the security key is co
     // PATH 1: Google Gemini Free Cloud AI (Fast Reasoning & Open-ended Chat)
     // Auto-detects connectivity: uses Gemini when online, native engine when offline
     // ========================================================================
-    const activeGeminiKey = (settings.geminiApiKey && settings.geminiApiKey.trim()) || DEFAULT_GEMINI_API_KEY;
-    const canUseGemini =
-      settings.aiProvider !== 'ollama' &&
-      settings.aiProvider !== 'offline' &&
-      Boolean(activeGeminiKey) &&
-      internetReachable;
+    // Using component-level activeGeminiKey and canUseGemini
 
     if (canUseGemini) {
       try {
@@ -1361,6 +1479,94 @@ I can scan all nearby Wi-Fi networks, run an internet speed test on Cloudflare E
                       onClick={() => handleConnectWifiSubmit(msg.id, msg.requiresPassword!.ssid)}
                     >
                       Connect
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Action Confirmation Card (when toolExecution.status === 'confirming') */}
+              {msg.toolExecution?.status === 'confirming' && (
+                <div
+                  style={{
+                    marginTop: 8,
+                    padding: '12px 14px',
+                    borderRadius: 10,
+                    background: 'var(--bg-surface-elevated)',
+                    border: '1px solid rgba(245, 158, 11, 0.4)',
+                    boxShadow: '0 4px 14px rgba(0, 0, 0, 0.12)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 10,
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <div
+                      style={{
+                        width: 28,
+                        height: 28,
+                        borderRadius: 6,
+                        background: 'rgba(245, 158, 11, 0.15)',
+                        color: '#f59e0b',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        flexShrink: 0,
+                      }}
+                    >
+                      <AlertTriangle size={16} />
+                    </div>
+                    <div>
+                      <div style={{ fontSize: '0.84rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+                        Confirm Action: {msg.toolExecution.displayName}
+                      </div>
+                      <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
+                        {msg.toolExecution.toolName === 'flush_dns'
+                          ? 'Clears Windows DNS cache to resolve hostname lookups. Non-destructive.'
+                          : msg.toolExecution.toolName === 'renew_dhcp'
+                          ? 'Renews local IP from router. May interrupt active connections for 2-4 seconds.'
+                          : msg.toolExecution.toolName === 'disconnect_wifi'
+                          ? 'Disconnects from the active wireless network.'
+                          : 'Requires user confirmation before running.'}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: 8, marginTop: 2 }}>
+                    <button
+                      className="btn-primary"
+                      onClick={() => handleConfirmToolExecution(msg.id)}
+                      style={{
+                        padding: '6px 14px',
+                        fontSize: '0.80rem',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 6,
+                        background: '#0284c7',
+                        border: 'none',
+                        color: '#ffffff',
+                        fontWeight: 650,
+                        borderRadius: 6,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      <CheckCircle2 size={14} />
+                      Confirm &amp; Run
+                    </button>
+                    <button
+                      className="btn-secondary"
+                      onClick={() => handleCancelToolExecution(msg.id)}
+                      style={{
+                        padding: '6px 12px',
+                        fontSize: '0.80rem',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 5,
+                        borderRadius: 6,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      <X size={14} />
+                      Cancel
                     </button>
                   </div>
                 </div>

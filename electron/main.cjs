@@ -1847,10 +1847,15 @@ ipcMain.handle('netx:quit-app', () => {
 // ============================================================================
 ipcMain.handle('netx:flush-dns', async () => {
   try {
-    const { stdout } = await execAsync('ipconfig /flushdns', { timeout: 6000 });
-    return { ok: true, output: stdout.trim() };
+    try {
+      await execAsync('powershell -NoProfile -Command "Clear-DnsClientCache"', { timeout: 5000 });
+      return { ok: true, output: 'Successfully flushed the DNS Resolver Cache.' };
+    } catch {
+      const { stdout } = await execAsync('ipconfig /flushdns', { timeout: 5000 });
+      return { ok: true, output: stdout.trim() };
+    }
   } catch (err) {
-    return { ok: false, error: err.stdout || String(err) };
+    return { ok: false, error: err.stdout || err.message || String(err) };
   }
 });
 
