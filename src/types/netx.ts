@@ -1,3 +1,10 @@
+export type DiagnosticSeverity = 'info' | 'warning' | 'danger';
+
+export type ToolCategory = 'diagnostic' | 'repair' | 'telemetry' | 'discovery';
+
+/**
+ * Top-level navigation sections within NetX Core Suite and Utilities
+ */
 export type NavSection =
   | 'dashboard'
   | 'ai-assistant'
@@ -13,11 +20,14 @@ export type NavSection =
   | 'history'
   | 'settings';
 
+/**
+ * Persistent network event or anomaly recorded in the audit log
+ */
 export interface NetworkEventItem {
   id: string;
   timestamp: string;
   type: 'disconnect' | 'reconnect' | 'latency_spike' | 'packet_loss' | 'threshold' | 'adapter_change' | 'info';
-  severity: 'info' | 'warning' | 'danger';
+  severity: DiagnosticSeverity;
   title: string;
   description: string;
   evidence?: string;
