@@ -11,6 +11,11 @@
     "dev:vite": "vite",
     "build": "tsc && vite build",
     "start": "electron .",
+    "test:formatters": "npx tsx tests/formatters.test.ts",
+    "test:conversational": "npx tsx tests/ai-conversational-suite.ts",
+    "test:assistant": "npx tsx tests/ai-assistant-suite.ts",
+    "test:all": "npx tsx tests/formatters.test.ts && npx tsx tests/ai-conversational-suite.ts && npx tsx tests/ai-assistant-suite.ts",
+    "cli:benchmark": "node scripts/benchmark-cli.mjs",
     "package:exe": "npx.cmd @electron/packager . NetX --platform=win32 --arch=x64 --out=release --overwrite --icon=public/netx-icon.ico --ignore=\"^/(src|src-tauri|release|docs|\\.git)\"",
     "package:installer": "npm run build && electron-builder --win nsis --x64"
   },
