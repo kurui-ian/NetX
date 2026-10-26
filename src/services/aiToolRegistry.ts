@@ -12,10 +12,13 @@ export interface ToolParameterDef {
   default?: any;
 }
 
+import { ToolCategory } from '../types/netx';
+
 export interface ToolDefinition {
   name: string;
   displayName: string;
   description: string;
+  category?: ToolCategory;
   parameters: {
     type: 'object';
     properties: Record<string, ToolParameterDef>;
@@ -436,4 +439,19 @@ export function getOllamaToolsSchema() {
 
 export function findToolByName(name: string): ToolDefinition | undefined {
   return NETX_AI_TOOLS.find((t) => t.name === name);
+}
+
+/**
+ * Filter available tools by functional category
+ */
+export function getToolsByCategory(category: ToolCategory): ToolDefinition[] {
+  return NETX_AI_TOOLS.filter((t) => t.category === category);
+}
+
+/**
+ * Check whether a tool is disruptive and requires explicit user consent
+ */
+export function isToolDisruptive(toolName: string): boolean {
+  const tool = findToolByName(toolName);
+  return Boolean(tool?.requiresConfirmation);
 }
