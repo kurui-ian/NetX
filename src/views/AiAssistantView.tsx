@@ -1,5 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
+  Mic,
+  Square,
+  Check,
   Activity,
   AlertCircle,
   AlertTriangle,
@@ -45,6 +48,7 @@ import {
   extractFallbackJsonToolCall,
   NETX_AI_SYSTEM_PROMPT,
 } from '../services/ollamaClient';
+import { netxDictation, DictationState } from '../services/dictationService';
 import {
   sendGeminiChat,
   GeminiChatTurn,
@@ -160,6 +164,71 @@ How can I help you today? Feel free to ask anything or tap one of the quick sugg
   });
 
   const [inputQuery, setInputQuery] = useState('');
+  const [dictationState, setDictationState] = useState<DictationState>('idle');
+  const [audioLevel, setAudioLevel] = useState<number>(0);
+  const [recordingSec, setRecordingSec] = useState<number>(0);
+  const [dictationBadge, setDictationBadge] = useState<{ text: string; engine: string } | null>(null);
+
+  const toggleDictation = async () => {
+    if (dictationState === 'listening') {
+      const res = await netxDictation.stopAndTranscribe(
+        {
+          mode: settings.dictationMode || 'auto',
+          apiKey: settings.geminiApiKey,
+          model: settings.geminiModel,
+          isOnline: internetReachable,
+        },
+        {
+          onStateChange: setDictationState,
+          onError: (err) => pushToast(err, 'warning'),
+        }
+      );
+
+      if (res.ok && res.text) {
+        const clean = res.text.trim();
+        const engineLabel =
+          res.engine === 'gemini'
+            ? 'Google Gemini (Neural Speech)'
+            : res.engine === 'windows-offline'
+            ? 'Windows Native (100% Offline)'
+            : 'Speech Engine';
+
+        setDictationBadge({
+          text: `Transcribed via ${engineLabel}`,
+          engine: res.engine,
+        });
+        setTimeout(() => setDictationBadge(null), 4500);
+
+        if (settings.dictationAutoSend) {
+          setInputQuery('');
+          handleSendMessage(clean);
+        } else {
+          setInputQuery((prev) => (prev ? `${prev} ${clean}` : clean));
+          setTimeout(() => inputRef.current?.focus(), 50);
+        }
+      } else if (res.error && res.error !== 'No speech could be recognized') {
+        pushToast(res.error, 'warning');
+      }
+    } else if (dictationState === 'idle') {
+      const started = await netxDictation.startListening({
+        onStateChange: setDictationState,
+        onAudioLevel: setAudioLevel,
+        onDuration: setRecordingSec,
+        onError: (err) => pushToast(err, 'warning'),
+      });
+      if (!started) {
+        pushToast('Unable to access microphone. Please check system permissions.', 'warning');
+      }
+    }
+  };
+
+  const cancelDictation = () => {
+    netxDictation.cancel({
+      onStateChange: setDictationState,
+    });
+    setAudioLevel(0);
+    setRecordingSec(0);
+  };
   const [isProcessing, setIsProcessing] = useState(false);
   const [runningActionStatus, setRunningActionStatus] = useState<string | null>(null);
 
@@ -1643,41 +1712,174 @@ I can scan all nearby Wi-Fi networks, run an internet speed test on Cloudflare E
         ))}
       </div>
 
-      {/* 5. Natural-Language Input Bar */}
-      <div className="surface-card" style={{ padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 10 }}>
-        <input
-          ref={inputRef}
-          type="text"
-          placeholder="Ask NetX AI anything, scan Wi-Fi, or test connection..."
-          value={inputQuery}
-          onChange={(e) => setInputQuery(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault();
-              handleSendMessage();
-            }
-          }}
-          disabled={isProcessing}
+      {/* 4.5 Transcribed Engine Badge */}
+      {dictationBadge && (
+        <div
           style={{
-            flex: 1,
-            background: 'transparent',
-            border: 'none',
-            outline: 'none',
-            color: 'var(--text-primary)',
-            fontSize: '0.92rem',
-            padding: '6px 4px',
+            alignSelf: 'flex-start',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
+            padding: '3px 10px',
+            borderRadius: 14,
+            fontSize: '0.74rem',
+            fontWeight: 600,
+            background: 'rgba(16, 185, 129, 0.1)',
+            border: '1px solid rgba(16, 185, 129, 0.3)',
+            color: 'var(--brand-mint)',
+            marginBottom: 4,
           }}
-        />
-
-        <button
-          className="btn-primary"
-          onClick={() => handleSendMessage()}
-          disabled={!inputQuery.trim() || isProcessing}
-          style={{ padding: '8px 16px', display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem' }}
         >
-          <Send size={14} />
-          <span>Send</span>
-        </button>
+          <Sparkles size={11} />
+          <span>{dictationBadge.text}</span>
+        </div>
+      )}
+
+      {/* 5. Natural-Language Input Bar with Hands-Free Voice Dictation */}
+      <div
+        className="surface-card"
+        style={{
+          padding: '8px 12px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          border:
+            dictationState === 'listening'
+              ? '1px solid var(--brand-cyan)'
+              : '1px solid var(--border-default)',
+          boxShadow:
+            dictationState === 'listening'
+              ? '0 0 16px rgba(0, 229, 255, 0.18)'
+              : 'none',
+          transition: 'all 0.2s ease',
+        }}
+      >
+        {dictationState === 'listening' ? (
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span
+                style={{
+                  width: 9,
+                  height: 9,
+                  borderRadius: '50%',
+                  background: '#ef4444',
+                  boxShadow: '0 0 8px #ef4444',
+                  display: 'inline-block',
+                }}
+              />
+              <span style={{ fontSize: '0.82rem', fontWeight: 650, color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>
+                00:{recordingSec < 10 ? `0${recordingSec}` : recordingSec}
+              </span>
+            </div>
+
+            {/* Live Audio Visualizer Bars */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 3, height: 18 }}>
+              {[0.4, 0.8, 1.2, 0.9, 0.5].map((mult, idx) => {
+                const height = Math.max(3, Math.min(18, Math.round(audioLevel * 22 * mult)));
+                return (
+                  <span
+                    key={idx}
+                    style={{
+                      width: 3,
+                      height: `${height}px`,
+                      borderRadius: 2,
+                      background: 'var(--brand-cyan)',
+                      transition: 'height 0.08s ease',
+                    }}
+                  />
+                );
+              })}
+            </div>
+
+            <span style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
+              Listening... Speak naturally (click to finish)
+            </span>
+
+            <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <button
+                className="btn-secondary"
+                onClick={cancelDictation}
+                title="Cancel dictation"
+                style={{ padding: '5px 10px', fontSize: '0.75rem', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 4 }}
+              >
+                <X size={12} />
+                <span>Cancel</span>
+              </button>
+              <button
+                className="btn-primary"
+                onClick={toggleDictation}
+                title="Stop & transcribe"
+                style={{ padding: '5px 12px', fontSize: '0.75rem', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 4 }}
+              >
+                <Square size={11} style={{ fill: 'currentColor' }} />
+                <span>Finish</span>
+              </button>
+            </div>
+          </div>
+        ) : dictationState === 'transcribing' ? (
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0' }}>
+            <RefreshCw size={14} className="animate-spin" style={{ color: 'var(--brand-cyan)' }} />
+            <span style={{ fontSize: '0.85rem', color: 'var(--brand-cyan)', fontWeight: 550 }}>
+              Transcribing voice dictation (Gemini &amp; Offline engine)...
+            </span>
+          </div>
+        ) : (
+          <>
+            <input
+              ref={inputRef}
+              type="text"
+              placeholder="Ask NetX AI anything, or click the mic to speak hands-free..."
+              value={inputQuery}
+              onChange={(e) => setInputQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSendMessage();
+                }
+              }}
+              disabled={isProcessing}
+              style={{
+                flex: 1,
+                background: 'transparent',
+                border: 'none',
+                outline: 'none',
+                color: 'var(--text-primary)',
+                fontSize: '0.92rem',
+                padding: '6px 4px',
+              }}
+            />
+
+            <button
+              onClick={toggleDictation}
+              disabled={isProcessing}
+              title="Voice Dictation (Works Online & Offline)"
+              style={{
+                background: 'transparent',
+                border: '1px solid var(--border-default)',
+                borderRadius: 8,
+                padding: '7px 9px',
+                color: 'var(--brand-cyan)',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                transition: 'all 0.15s ease',
+              }}
+            >
+              <Mic size={15} />
+            </button>
+
+            <button
+              className="btn-primary"
+              onClick={() => handleSendMessage()}
+              disabled={!inputQuery.trim() || isProcessing}
+              style={{ padding: '8px 16px', display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem' }}
+            >
+              <Send size={14} />
+              <span>Send</span>
+            </button>
+          </>
+        )}
       </div>
     </div>
   );

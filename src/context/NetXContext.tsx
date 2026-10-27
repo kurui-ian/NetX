@@ -36,6 +36,8 @@ const DEFAULT_SETTINGS: NetXSettings = {
   aiTemperature: 0.4,
   aiConfirmActions: true,
   customUserName: '',
+  dictationMode: 'auto',
+  dictationAutoSend: false,
 };
 
 const EMPTY_NETWORK_INFO: RealNetworkInfo = {

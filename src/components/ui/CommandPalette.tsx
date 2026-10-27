@@ -26,9 +26,13 @@ import {
   Wrench,
   X,
   Zap,
+  Mic,
+  Square,
+  RefreshCw,
 } from 'lucide-react';
 import { useNetX } from '../../context/NetXContext';
 import { NavSection } from '../../types/netx';
+import { netxDictation, DictationState } from '../../services/dictationService';
 
 interface CommandPaletteProps {
   isOpen: boolean;
@@ -54,10 +58,38 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
     monitoringPaused,
     setMonitoringPaused,
     pushToast,
+    internetReachable,
   } = useNetX();
 
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [dictState, setDictState] = useState<DictationState>('idle');
+
+  const togglePaletteDictation = async () => {
+    if (dictState === 'listening') {
+      const res = await netxDictation.stopAndTranscribe(
+        {
+          mode: settings.dictationMode || 'auto',
+          apiKey: settings.geminiApiKey,
+          model: settings.geminiModel,
+          isOnline: internetReachable,
+        },
+        { onStateChange: setDictState }
+      );
+      if (res.ok && res.text) {
+        const clean = res.text.replace(/[.?!]$/, '').trim();
+        setQuery(clean);
+        setSelectedIndex(0);
+      }
+    } else if (dictState === 'idle') {
+      const started = await netxDictation.startListening({
+        onStateChange: setDictState,
+      });
+      if (!started) {
+        pushToast('Microphone access denied', 'warning');
+      }
+    }
+  };
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -355,6 +387,24 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
               setSelectedIndex(0);
             }}
           />
+          <button
+            type="button"
+            className="palette-close-btn"
+            onClick={togglePaletteDictation}
+            title={dictState === 'listening' ? 'Finish speaking' : 'Voice search (Online & Offline)'}
+            style={{
+              color: dictState === 'listening' ? '#ef4444' : 'var(--brand-cyan)',
+              marginRight: 4,
+            }}
+          >
+            {dictState === 'listening' ? (
+              <Square size={13} style={{ fill: 'currentColor' }} />
+            ) : dictState === 'transcribing' ? (
+              <RefreshCw size={13} className="animate-spin" />
+            ) : (
+              <Mic size={15} />
+            )}
+          </button>
           <button type="button" className="palette-close-btn" onClick={onClose} title="Close (Esc)">
             <kbd className="palette-kbd">Esc</kbd>
           </button>

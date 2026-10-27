@@ -29,6 +29,9 @@ contextBridge.exposeInMainWorld('netxNative', {
   getOllamaStatus: (url) => ipcRenderer.invoke('netx:ollama-status', { url }),
   chatOllama: (payload) => ipcRenderer.invoke('netx:ollama-chat', payload),
   chatGemini: (payload) => ipcRenderer.invoke('netx:gemini-chat', payload),
+  transcribeAudio: (payload) => ipcRenderer.invoke('netx:transcribe-audio', payload),
+  listenNativeMic: (options) => ipcRenderer.invoke('netx:listen-native-mic', options),
+  getSpeechStatus: () => ipcRenderer.invoke('netx:get-speech-status'),
   getSystemUser: () => ipcRenderer.invoke('netx:get-system-user'),
   quitApp: () => ipcRenderer.invoke('netx:quit-app'),
 });

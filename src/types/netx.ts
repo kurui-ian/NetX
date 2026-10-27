@@ -199,6 +199,9 @@ export interface NetXSettings {
   aiTemperature: number;
   aiConfirmActions: boolean;
   customUserName: string;
+  // Voice Dictation Configuration
+  dictationMode?: 'auto' | 'offline' | 'online';
+  dictationAutoSend?: boolean;
 }
 
 export interface ToastMessage {
@@ -232,6 +235,9 @@ declare global {
       getOllamaStatus: (url?: string) => Promise<{ ok: boolean; online: boolean; version?: string; url?: string; models: OllamaModelInfo[]; error?: string }>;
       chatOllama: (payload: { url?: string; model: string; messages: any[]; tools?: any[]; options?: any }) => Promise<{ ok: boolean; message?: any; done?: boolean; totalDuration?: number; evalCount?: number; error?: string }>;
       chatGemini: (payload: { apiKey: string; model?: string; payload: any }) => Promise<{ ok: boolean; data?: any; error?: string }>;
+      transcribeAudio: (payload: { audioBase64: string; mimeType?: string; preferOnline?: boolean; apiKey?: string; model?: string }) => Promise<{ ok: boolean; text?: string; confidence?: number; grammar?: string; engine?: string; error?: string }>;
+      listenNativeMic: (options?: { seconds?: number }) => Promise<{ ok: boolean; text?: string; confidence?: number; grammar?: string; engine?: string; error?: string }>;
+      getSpeechStatus: () => Promise<{ ok: boolean; available: boolean; offlineSupported: boolean; count?: number; engines?: Array<{ id: string; name: string; culture: string }>; error?: string }>;
       getSystemUser: () => Promise<{ username: string; hostname: string }>;
       quitApp: () => Promise<any>;
     };

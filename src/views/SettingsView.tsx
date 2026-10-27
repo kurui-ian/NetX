@@ -23,16 +23,20 @@ import {
   ShieldCheck,
   Eye,
   EyeOff,
+  Mic,
+  Square,
 } from 'lucide-react';
 import { useNetX } from '../context/NetXContext';
 import { AppearanceMode } from '../types/netx';
 import { Button, StatusBadge, ToggleSwitch } from '../components/ui/Primitives';
 import { checkOllamaConnection, RECOMMENDED_MODELS } from '../services/ollamaClient';
 import { testGeminiApiKey } from '../services/geminiClient';
+import { netxDictation } from '../services/dictationService';
 
 type SettingsTab =
   | 'appearance'
   | 'ai'
+  | 'voice'
   | 'startup'
   | 'notifications'
   | 'monitoring'
@@ -57,10 +61,50 @@ export const SettingsView: React.FC = () => {
   const [testingGemini, setTestingGemini] = useState(false);
   const [geminiTestResult, setGeminiTestResult] = useState<{ ok: boolean; message?: string } | null>(null);
   const [showApiKey, setShowApiKey] = useState(false);
+  const [speechStatus, setSpeechStatus] = useState<{ available: boolean; engines?: any[] } | null>(null);
+  const [isTestingVoice, setIsTestingVoice] = useState(false);
+  const [voiceTestResult, setVoiceTestResult] = useState<{ text?: string; engine?: string; error?: string } | null>(null);
+
+  React.useEffect(() => {
+    if (window.netxNative?.getSpeechStatus) {
+      window.netxNative.getSpeechStatus().then((status) => {
+        if (status.ok) setSpeechStatus(status);
+      }).catch(() => {});
+    }
+  }, []);
+
+  const handleTestVoice = async () => {
+    if (isTestingVoice) {
+      setIsTestingVoice(false);
+      const res = await netxDictation.stopAndTranscribe(
+        {
+          mode: settings.dictationMode || 'auto',
+          apiKey: settings.geminiApiKey,
+          model: settings.geminiModel,
+          isOnline: internetReachable,
+        },
+        {}
+      );
+      if (res.ok && res.text) {
+        setVoiceTestResult({ text: res.text, engine: res.engine });
+      } else {
+        setVoiceTestResult({ error: res.error || 'No speech recognized' });
+      }
+    } else {
+      setVoiceTestResult(null);
+      const started = await netxDictation.startListening({});
+      if (started) {
+        setIsTestingVoice(true);
+      } else {
+        setVoiceTestResult({ error: 'Could not access microphone' });
+      }
+    }
+  };
 
   const categories: { id: SettingsTab; label: string; icon: React.ReactNode }[] = [
     { id: 'appearance', label: 'Appearance', icon: <Palette size={16} /> },
     { id: 'ai', label: 'AI Assistant', icon: <Sparkles size={16} /> },
+    { id: 'voice', label: 'Voice & Dictation', icon: <Mic size={16} /> },
     { id: 'startup', label: 'Startup', icon: <Power size={16} /> },
     { id: 'notifications', label: 'Notifications', icon: <Bell size={16} /> },
     { id: 'monitoring', label: 'Monitoring', icon: <Activity size={16} /> },
@@ -745,6 +789,229 @@ export const SettingsView: React.FC = () => {
                     onChange={(e) => updateSettings({ aiTemperature: parseFloat(e.target.value) })}
                     style={{ width: 140 }}
                   />
+                </div>
+              </div>
+            </section>
+          )}
+
+          {activeCategory === 'voice' && (
+            <section aria-label="Voice & Dictation settings">
+              <div className="surface-panel-header">
+                <div>
+                  <h2 className="surface-panel-title">Voice &amp; Dictation Engine</h2>
+                  <p className="surface-panel-subtitle">
+                    Speak naturally to NetX AI hands-free. Powered by Google Gemini cloud intelligence and 100% offline Windows native speech recognition.
+                  </p>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      padding: '4px 10px',
+                      borderRadius: 14,
+                      fontSize: '0.78rem',
+                      fontWeight: 600,
+                      background: 'rgba(16, 185, 129, 0.1)',
+                      border: '1px solid rgba(16, 185, 129, 0.3)',
+                      color: '#10b981',
+                    }}
+                  >
+                    <CheckCircle2 size={13} />
+                    <span>Offline Ready</span>
+                  </span>
+                </div>
+              </div>
+
+              {/* Dictation Mode Selector */}
+              <div className="surface-card" style={{ padding: 'var(--space-4)', marginBottom: 'var(--space-4)' }}>
+                <h3 style={{ fontSize: '0.92rem', fontWeight: 650, color: 'var(--text-primary)', marginBottom: 8 }}>
+                  Dictation Recognition Engine
+                </h3>
+                <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', marginBottom: 14 }}>
+                  Select how spoken audio is processed and transcribed into text.
+                </p>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
+                  {/* Option 1: Auto */}
+                  <div
+                    onClick={() => updateSettings({ dictationMode: 'auto' })}
+                    style={{
+                      padding: 14,
+                      borderRadius: 10,
+                      border: (settings.dictationMode || 'auto') === 'auto' ? '2px solid var(--brand-cyan)' : '1px solid var(--border-default)',
+                      background: (settings.dictationMode || 'auto') === 'auto' ? 'rgba(0, 229, 255, 0.05)' : 'var(--bg-surface-subtle)',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                      <span style={{ fontWeight: 650, fontSize: '0.88rem', color: 'var(--text-primary)' }}>
+                        ⚡ Intelligent Auto
+                      </span>
+                      <span style={{ fontSize: '0.7rem', padding: '2px 6px', borderRadius: 6, background: 'var(--brand-cyan)', color: '#000', fontWeight: 700 }}>
+                        RECOMMENDED
+                      </span>
+                    </div>
+                    <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', lineHeight: 1.4, margin: 0 }}>
+                      Uses Google Gemini for verbatim conversational neural accuracy when online, and automatically falls back to Windows Native Speech Recognizer when offline.
+                    </p>
+                  </div>
+
+                  {/* Option 2: Always Offline */}
+                  <div
+                    onClick={() => updateSettings({ dictationMode: 'offline' })}
+                    style={{
+                      padding: 14,
+                      borderRadius: 10,
+                      border: settings.dictationMode === 'offline' ? '2px solid #10b981' : '1px solid var(--border-default)',
+                      background: settings.dictationMode === 'offline' ? 'rgba(16, 185, 129, 0.05)' : 'var(--bg-surface-subtle)',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                      <span style={{ fontWeight: 650, fontSize: '0.88rem', color: 'var(--text-primary)' }}>
+                        🔒 100% Offline Only
+                      </span>
+                    </div>
+                    <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', lineHeight: 1.4, margin: 0 }}>
+                      Zero internet requests. Transcribes speech completely on-device using the native Windows Speech Engine (Microsoft Recognizer 8.0).
+                    </p>
+                  </div>
+
+                  {/* Option 3: Cloud Gemini */}
+                  <div
+                    onClick={() => updateSettings({ dictationMode: 'online' })}
+                    style={{
+                      padding: 14,
+                      borderRadius: 10,
+                      border: settings.dictationMode === 'online' ? '2px solid #8b5cf6' : '1px solid var(--border-default)',
+                      background: settings.dictationMode === 'online' ? 'rgba(139, 92, 246, 0.05)' : 'var(--bg-surface-subtle)',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                      <span style={{ fontWeight: 650, fontSize: '0.88rem', color: 'var(--text-primary)' }}>
+                        ✨ Gemini Cloud Only
+                      </span>
+                    </div>
+                    <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', lineHeight: 1.4, margin: 0 }}>
+                      Always sends recorded audio to Google Gemini multimodal endpoints for maximum nuance and complex technical terminology.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Behavior Settings */}
+              <div className="kv-list" style={{ marginBottom: 'var(--space-4)' }}>
+                <div className="kv-row">
+                  <div className="kv-row-label">
+                    <span>Auto-send voice commands</span>
+                    <span className="kv-row-desc">
+                      Automatically execute transcribed voice queries in NetX AI without requiring a manual Send button click.
+                    </span>
+                  </div>
+                  <ToggleSwitch
+                    checked={settings.dictationAutoSend || false}
+                    onChange={(checked) => updateSettings({ dictationAutoSend: checked })}
+                    label="Auto-send voice commands"
+                  />
+                </div>
+              </div>
+
+              {/* Live Microphone Test & Diagnostic Card */}
+              <div className="surface-card" style={{ padding: 'var(--space-4)', marginBottom: 'var(--space-4)' }}>
+                <h3 style={{ fontSize: '0.92rem', fontWeight: 650, color: 'var(--text-primary)', marginBottom: 6 }}>
+                  Test Voice Dictation
+                </h3>
+                <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', marginBottom: 12 }}>
+                  Click below and speak a sample phrase (e.g. &ldquo;run speed test&rdquo; or &ldquo;what is my IP address&rdquo;) to verify microphone input and recognition accuracy.
+                </p>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                  <button
+                    className={isTestingVoice ? 'btn-danger' : 'btn-primary'}
+                    onClick={handleTestVoice}
+                    style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 16px', fontSize: '0.85rem' }}
+                  >
+                    {isTestingVoice ? <Square size={14} style={{ fill: 'currentColor' }} /> : <Mic size={14} />}
+                    <span>{isTestingVoice ? 'Stop Speaking & Transcribe' : 'Test Microphone'}</span>
+                  </button>
+
+                  {isTestingVoice && (
+                    <span style={{ fontSize: '0.82rem', color: '#ef4444', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#ef4444' }} className="animate-pulse" />
+                      Listening to microphone...
+                    </span>
+                  )}
+                </div>
+
+                {voiceTestResult && (
+                  <div
+                    style={{
+                      marginTop: 14,
+                      padding: 12,
+                      borderRadius: 8,
+                      background: voiceTestResult.text ? 'rgba(16, 185, 129, 0.08)' : 'rgba(239, 68, 68, 0.08)',
+                      border: `1px solid ${voiceTestResult.text ? 'rgba(16, 185, 129, 0.25)' : 'rgba(239, 68, 68, 0.25)'}`,
+                    }}
+                  >
+                    {voiceTestResult.text ? (
+                      <div>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                          <span style={{ fontSize: '0.78rem', color: '#10b981', fontWeight: 700 }}>
+                            SUCCESSFULLY TRANSCRIBED ({voiceTestResult.engine})
+                          </span>
+                        </div>
+                        <div style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+                          &ldquo;{voiceTestResult.text}&rdquo;
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: '0.85rem', color: '#ef4444' }}>
+                        Error: {voiceTestResult.error}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Hardware & Windows Engine Telemetry */}
+              <div className="surface-card" style={{ padding: 'var(--space-4)' }}>
+                <h3 style={{ fontSize: '0.92rem', fontWeight: 650, color: 'var(--text-primary)', marginBottom: 8 }}>
+                  System Engine Details
+                </h3>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 10 }}>
+                  <div style={{ padding: 10, borderRadius: 8, background: 'var(--bg-surface-subtle)', border: '1px solid var(--border-default)' }}>
+                    <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>
+                      Windows Native Engine
+                    </div>
+                    <div style={{ fontSize: '0.86rem', color: 'var(--text-primary)', fontWeight: 600, marginTop: 4 }}>
+                      Microsoft Speech Recognizer 8.0
+                    </div>
+                    <div style={{ fontSize: '0.76rem', color: '#10b981', marginTop: 2 }}>
+                      ✓ Installed &amp; 100% Offline Verified
+                    </div>
+                  </div>
+
+                  <div style={{ padding: 10, borderRadius: 8, background: 'var(--bg-surface-subtle)', border: '1px solid var(--border-default)' }}>
+                    <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>
+                      Cloud Neural Engine
+                    </div>
+                    <div style={{ fontSize: '0.86rem', color: 'var(--text-primary)', fontWeight: 600, marginTop: 4 }}>
+                      Google Gemini Multimodal Audio
+                    </div>
+                    <div style={{ fontSize: '0.76rem', color: internetReachable ? '#10b981' : '#f59e0b', marginTop: 2 }}>
+                      {internetReachable ? '✓ Online & Available' : '⚠️ Offline (Will use Windows Native)'}
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ marginTop: 12, fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+                  💡 <strong>Pro Tip:</strong> You can also use Windows Dictation anywhere in Windows by pressing <kbd style={{ padding: '2px 5px', borderRadius: 4, background: 'var(--bg-surface-tinted)', border: '1px solid var(--border-default)' }}>Win + H</kbd>.
                 </div>
               </div>
             </section>

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, dialog, session } = require('electron');
 const path = require('path');
 const os = require('os');
 const fs = require('fs');
@@ -2168,6 +2168,155 @@ ipcMain.handle('netx:ollama-chat', async (_event, { url, model, messages, tools,
 });
 
 // ============================================================================
+// ============================================================================
+// NetX Precision Voice Dictation & Offline Speech Recognition
+// ============================================================================
+function getSpeechExePath() {
+  const devPath = path.join(__dirname, '..', 'bin', 'netxspeech.exe');
+  if (fs.existsSync(devPath)) return devPath;
+  const prodPath = path.join(process.resourcesPath || '', 'bin', 'netxspeech.exe');
+  if (fs.existsSync(prodPath)) return prodPath;
+  const appPath = path.join(app.getAppPath(), 'bin', 'netxspeech.exe');
+  if (fs.existsSync(appPath)) return appPath;
+  return devPath;
+}
+
+async function ensureSpeechBinary() {
+  const exePath = getSpeechExePath();
+  if (fs.existsSync(exePath)) return exePath;
+
+  const csPath = path.join(__dirname, '..', 'bin', 'netxspeech.cs');
+  if (!fs.existsSync(csPath)) return null;
+
+  const cscPath = 'C:\\Windows\\Microsoft.NET\\Framework64\\v4.0.30319\\csc.exe';
+  if (!fs.existsSync(cscPath)) return null;
+
+  try {
+    const gacSpeech = 'C:\\Windows\\Microsoft.NET\\assembly\\GAC_MSIL\\System.Speech\\v4.0_4.0.0.0__31bf3856ad364e35\\System.Speech.dll';
+    const refArg = fs.existsSync(gacSpeech) ? `/r:"${gacSpeech}"` : '/r:System.Speech.dll';
+    await execAsync(`"${cscPath}" /nologo /optimize ${refArg} /out:"${exePath}" "${csPath}"`);
+    return fs.existsSync(exePath) ? exePath : null;
+  } catch (err) {
+    console.error('Failed to auto-compile netxspeech.exe:', err);
+    return null;
+  }
+}
+
+ipcMain.handle('netx:get-speech-status', async () => {
+  const exePath = await ensureSpeechBinary();
+  if (!exePath) {
+    return { ok: false, available: false, offlineSupported: false, error: 'Speech binary unavailable' };
+  }
+  try {
+    const { stdout } = await execAsync(`"${exePath}" --check`, { timeout: 5000 });
+    const parsed = JSON.parse(stdout.trim());
+    return { ...parsed, available: true, offlineSupported: true };
+  } catch (err) {
+    return { ok: false, available: false, error: err.message };
+  }
+});
+
+ipcMain.handle('netx:transcribe-audio', async (_event, { audioBase64, mimeType = 'audio/wav', preferOnline = true, apiKey, model = 'gemini-3.5-flash-lite' } = {}) => {
+  if (!audioBase64) {
+    return { ok: false, error: 'No audio data received' };
+  }
+
+  // 1. Cloud Mode (Google Gemini Multimodal Audio): Precision neural transcription
+  if (preferOnline) {
+    const cleanKey = (apiKey && apiKey.trim()) || process.env.GEMINI_API_KEY || DEFAULT_GEMINI_API_KEY;
+    if (cleanKey) {
+      const candidateModels = ['gemini-2.5-flash', 'gemini-3.5-flash-lite', 'gemini-flash-lite-latest'];
+      for (const m of candidateModels) {
+        try {
+          const url = `https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent?key=${cleanKey}`;
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), 7000);
+
+          const res = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [{
+                role: 'user',
+                parts: [
+                  {
+                    inlineData: {
+                      mimeType: mimeType || 'audio/wav',
+                      data: audioBase64,
+                    },
+                  },
+                  {
+                    text: 'Transcribe this voice dictation verbatim. Return only the exact transcribed speech with appropriate punctuation and capitalization. Do not include markdown code fences, quotes, preamble, or any explanations.',
+                  },
+                ],
+              }],
+              generationConfig: {
+                temperature: 0.1,
+                maxOutputTokens: 300,
+              },
+            }),
+            signal: controller.signal,
+          });
+          clearTimeout(timeout);
+
+          if (res.ok) {
+            const data = await res.json();
+            const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+            if (text && text.trim()) {
+              return {
+                ok: true,
+                text: text.trim().replace(/^["']|["']$/g, ''),
+                confidence: 0.98,
+                engine: 'gemini',
+              };
+            }
+          }
+        } catch (err) {
+          // Fall through to offline Windows speech engine
+        }
+      }
+    }
+  }
+
+  // 2. Offline Mode: Windows Native Speech Recognition Engine (netxspeech.exe)
+  const exePath = await ensureSpeechBinary();
+  if (!exePath) {
+    return { ok: false, error: 'Offline speech engine binary not available' };
+  }
+
+  const tempWav = path.join(os.tmpdir(), `netx_dictation_${Date.now()}_${Math.random().toString(36).slice(2, 7)}.wav`);
+  try {
+    const buffer = Buffer.from(audioBase64, 'base64');
+    fs.writeFileSync(tempWav, buffer);
+
+    const { stdout } = await execAsync(`"${exePath}" --file "${tempWav}"`, { timeout: 25000 });
+    const parsed = JSON.parse(stdout.trim());
+    return parsed;
+  } catch (err) {
+    return { ok: false, error: err.message || 'Offline speech recognition failed' };
+  } finally {
+    if (fs.existsSync(tempWav)) {
+      try { fs.unlinkSync(tempWav); } catch {}
+    }
+  }
+});
+
+ipcMain.handle('netx:listen-native-mic', async (_event, { seconds = 6 } = {}) => {
+  const exePath = await ensureSpeechBinary();
+  if (!exePath) {
+    return { ok: false, error: 'Speech engine binary not available' };
+  }
+  try {
+    const duration = Math.max(2, Math.min(seconds, 30));
+    const { stdout } = await execAsync(`"${exePath}" --listen ${duration}`, { timeout: 35000 });
+    const parsed = JSON.parse(stdout.trim());
+    return parsed;
+  } catch (err) {
+    return { ok: false, error: err.message || 'Native microphone dictation failed' };
+  }
+});
+
+// ============================================================================
 // Native Windows System Tray & BrowserWindow Setup
 // ============================================================================
 function createTrayIcon() {
@@ -2329,6 +2478,14 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  if (session && session.defaultSession) {
+    session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
+      if (permission === 'media') {
+        return callback(true);
+      }
+      callback(true);
+    });
+  }
   usageStore = loadUsageStore();
   try {
     tray = new Tray(createTrayIcon());
